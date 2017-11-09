@@ -21,9 +21,25 @@ module ESP32
     end
   end
   
+  def self.wifi_connected?
+    @wifi_connected
+  end
+  
   def self.pass!
     event? if events_enabled?   
     __tick!
+    if wifi_has_ip?
+      p :ip
+      if !@wifi_connected
+        @wifi_connected = true
+        if cb = @on_wifi_connected_cb
+          p :call
+          cb.call wifi_get_ip
+        end
+      end
+    else
+      @wifi_connected = false
+    end
   end
   
   def self.loop
@@ -47,22 +63,31 @@ module ESP32
     (@__tick_queue__ ||= []) << b
   end
 
-  def self.timeout d, &b
-    interval d do
+  def self.timeout d, res=:usec, &b
+    interval d, res do
       b.call
       
       next false
     end
   end
 
-  def self.interval d, &b
-    usec_step =  (d * (0.000001))
-    n_tick = time + usec_step
+  def self.interval d, res=:usec, &b
+    step = nil
+    case res
+    when :usec
+      step = d  *  0.000001
+    when :millis
+      step = d * 0.001
+    when :second
+      step = d
+    end
+
+    n_tick = time + step
     
     tick do |t_cb|    
       if d > 0
-        next unless (time() - n_tick) >= usec_step
-        n_tick += usec_step
+        next unless (time() >= n_tick)
+        n_tick += step
       end
       
       unless b.call t_cb
@@ -85,6 +110,11 @@ module ESP32
   def self.events_enabled?
     @events_enabled
   end
+
+  def self.wifi_connect ssid, pass, &b
+    @on_wifi_connected_cb = b
+    __wifi_connect__ ssid,pass
+  end 
   
   def self.main
     while 1
@@ -96,10 +126,13 @@ module ESP32
   
   class Timer
     attr_accessor :count, :max, :auto_reset
-    attr_reader   :interval
+    attr_reader   :interval, :resolution
     
     def initialize interval, max = -1, &b
-      @interval = interval
+      a = interval.is_a?(Array) ? interval : [interval]
+      
+      @interval   = a[0]
+      @resolution = a[1] || :usec
       
       max = max ? max : -1
       
@@ -139,7 +172,7 @@ module ESP32
     def start
       @enable = true
     
-      ESP32.interval interval do |t_cb|
+      ESP32.interval interval, resolution do |t_cb|
         @t_cb = t_cb
         
         if enabled?
