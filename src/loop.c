@@ -147,7 +147,7 @@ mruby_esp32_loop_wifi_connect(mrb_state *mrb, mrb_value self) {
   char *ssid = NULL;
   char *password = NULL;
 
-  mrb_get_args(mrb, "zz&", &ssid, &password);
+  mrb_get_args(mrb, "zz", &ssid, &password);
 
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK( esp_wifi_init(&cfg) );

@@ -1,10 +1,6 @@
 
 $ip = nil
 
-ESP32.wifi_connect("LGL64VL_7870", "FooBar12") do |ip|
-  p $ip = ip
-end
-
   pin = ESP32::GPIO::Pin.new(23, :output)
 
   t     = 0
@@ -21,13 +17,9 @@ end
     end
   end
 
-  ESP32.timeout 1, :second do
-    tmr.stop
-  end
-  
-  ESP32.timeout 2000, :millis do
-    tmr.start
-  end
+ESP32.wifi_connect("kittykat", "FooBar-12") do |ip|
+  puts "\nIP: #{$ip = ip}\n"
+end
 
   cnt = 0
 

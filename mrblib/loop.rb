@@ -29,11 +29,9 @@ module ESP32
     event? if events_enabled?   
     __tick!
     if wifi_has_ip?
-      p :ip
       if !@wifi_connected
         @wifi_connected = true
         if cb = @on_wifi_connected_cb
-          p :call
           cb.call wifi_get_ip
         end
       end
@@ -114,6 +112,9 @@ module ESP32
   def self.wifi_connect ssid, pass, &b
     @on_wifi_connected_cb = b
     __wifi_connect__ ssid,pass
+    3000.times do
+      yield!
+    end  
   end 
   
   def self.main
