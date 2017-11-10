@@ -153,8 +153,8 @@ mruby_esp32_loop_wifi_connect(mrb_state *mrb, mrb_value self) {
   ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
   ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
 
-  wifi_config_t wifi_config;
-  memset((void *)&wifi_config, 0, sizeof(wifi_config_t));
+  wifi_config_t wifi_config = {0};
+  //memset((void *)&wifi_config, 0, sizeof(wifi_config_t));
   snprintf(wifi_config.sta.ssid, sizeof(wifi_config.sta.ssid), "%s", ssid);
   snprintf(wifi_config.sta.password, sizeof(wifi_config.sta.password), "%s", password);
 
@@ -186,6 +186,8 @@ static mrb_value mruby_esp32_loop_wifi_has_ip(mrb_state* mrb, mrb_value self) {
 void
 mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
 {
+  esp_log_level_set("wifi", ESP_LOG_NONE); // disable wifi driver logging	
+	
   mruby_esp32_loop_env.init        = FALSE;
   mruby_esp32_loop_env.event_queue = NULL;	
 
@@ -207,8 +209,8 @@ mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
   mrb_define_module_function(mrb, esp32, "log",    mruby_esp32_loop_log, MRB_ARGS_REQ(1));      
 
   mrb_define_module_function(mrb, esp32, "__wifi_connect__",  mruby_esp32_loop_wifi_connect, MRB_ARGS_REQ(2)); 
-  mrb_define_module_function(mrb, esp32, "wifi_get_ip",   mruby_esp32_loop_wifi_get_ip, MRB_ARGS_NONE());   
-  mrb_define_module_function(mrb, esp32, "wifi_has_ip?",  mruby_esp32_loop_wifi_has_ip, MRB_ARGS_NONE());   
+  mrb_define_module_function(mrb, esp32, "wifi_get_ip",       mruby_esp32_loop_wifi_get_ip, MRB_ARGS_NONE());   
+  mrb_define_module_function(mrb, esp32, "wifi_has_ip?",      mruby_esp32_loop_wifi_has_ip, MRB_ARGS_NONE());   
 
 
   constants = mrb_define_module_under(mrb, esp32, "Constants");

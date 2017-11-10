@@ -3,31 +3,17 @@ module ESP32
     @time ||= Time.now.to_f
   end
   
-  def self.__tick!
-    return if time == t=Time.now.to_f
-    
-    @time = t
-    t = nil
-  
-    if @__tick_queue__
-      @__tick_queue__.each do |cb|
-        begin
-          cb.call cb
-        rescue => e
-          puts "\n#{e}"
-          raise e
-        end
-      end
-    end
-  end
-  
   def self.wifi_connected?
     @wifi_connected
   end
   
   def self.pass!
     event? if events_enabled?   
-    __tick!
+    
+    @time = Time.now.to_f
+    
+    Timer.fire_for(time)
+    
     if wifi_has_ip?
       if !@wifi_connected
         @wifi_connected = true
@@ -36,6 +22,12 @@ module ESP32
         end
       end
     else
+      if @wifi_connected
+        if cb = @on_wifi_disconnected_cb
+          cb.call
+        end
+      end
+      
       @wifi_connected = false
     end
   end
@@ -52,46 +44,13 @@ module ESP32
       pass!
     end
   end
-  
-  def self.remove_tick b
-    @__tick_queue__.delete(b)
-  end
-
-  def self.tick &b
-    (@__tick_queue__ ||= []) << b
-  end
 
   def self.timeout d, res=:usec, &b
-    interval d, res do
-      b.call
-      
-      next false
-    end
+    Timer.new [d, res], 1, &b
   end
-
+  
   def self.interval d, res=:usec, &b
-    step = nil
-    case res
-    when :usec
-      step = d  *  0.000001
-    when :millis
-      step = d * 0.001
-    when :second
-      step = d
-    end
-
-    n_tick = time + step
-    
-    tick do |t_cb|    
-      if d > 0
-        next unless (time() >= n_tick)
-        n_tick += step
-      end
-      
-      unless b.call t_cb
-        remove_tick t_cb
-      end
-    end  
+    Timer.new [d, res], &b
   end
   
   @events_enabled        = false
@@ -109,12 +68,13 @@ module ESP32
     @events_enabled
   end
 
+  def self.on_wifi_disconnect &b
+    @on_wifi_disconnected_cb = b
+  end
+
   def self.wifi_connect ssid, pass, &b
     @on_wifi_connected_cb = b
-    __wifi_connect__ ssid,pass
-    3000.times do
-      yield!
-    end  
+    __wifi_connect__ ssid,pass  
   end 
   
   def self.main
@@ -126,14 +86,47 @@ module ESP32
   end
   
   class Timer
-    attr_accessor :count, :max, :auto_reset
+    attr_accessor :count, :max, :auto_reset, :n_tick
     attr_reader   :interval, :resolution
+    
+    @timers = []
+    
+    protected
+    def self.add_timer tmr
+      @timers << tmr
+    end
+    
+    public
+    def self.timers
+      @timers.map do |t| t end
+    end
+    
+    def self.remove_timer tmr
+      @timers.delete tmr
+      return tmr
+    end
+    
+    def self.firing time
+      @timers.find_all do |t|
+        t.n_tick <= t
+      end
+    end
+    
+    def self.fire_for time
+      @timers.each do |t|
+        t.tick! if t.n_tick <= time
+      end 
+    end
     
     def initialize interval, max = -1, &b
       a = interval.is_a?(Array) ? interval : [interval]
       
+      self.class.add_timer self
+      
       @interval   = a[0]
       @resolution = a[1] || :usec
+      
+      p update_next_tick    
       
       max = max ? max : -1
       
@@ -148,12 +141,13 @@ module ESP32
       end
     end
     
-    def stop
-      @enable = false
+    def delete
+      stop
+      self.class.remove_timer self
     end
     
-    def delete
-      ESP32.remove_tick @t_cb    
+    def stop
+      @enable = false
     end
     
     def reset
@@ -172,17 +166,6 @@ module ESP32
     
     def start
       @enable = true
-    
-      ESP32.interval interval, resolution do |t_cb|
-        @t_cb = t_cb
-        
-        if enabled?
-          tick!
-          next enabled?
-        end
-        
-        next false
-      end
     end
     
     def enabled?
@@ -200,24 +183,66 @@ module ESP32
       @on_expire_cb = b
     end
     
+    def update_next_tick
+      step = nil
+      case resolution
+      when :usec
+        step = interval  *  0.000001
+      when :millis
+        step = interval * 0.001
+      when :second
+        step = interval
+      end
+
+      @n_tick = ESP32.time + step      
+    end
+    
     def tick!
-      @count += 1 if enabled?
+      update_next_tick
+    
+      if enabled?
+        @count += 1
       
-      if count > max and max > 0
-        if cb = @on_expire_cb
-          cb.call self if enabled?
+        if count > max and max > 0
+          if cb = @on_expire_cb
+            cb.call self if enabled?
+          end
           
           unless auto_reset
             stop
+          else
+            reset
           end
         end
-          
-        reset
-      end
         
-      if cb = @on_tick_cb and enabled?
-        cb.call self, count
-      end    
+        if cb = @on_tick_cb
+          cb.call self, count
+        end 
+      end
+    end
+  end
+  
+  class WiFi
+    class << self
+      attr_reader :ssid, :pass
+    end
+  
+    def self.connect ssid, pass, &b
+      ESP32.wifi_connect ssid,pass, &b
+      @ssid = ssid
+      @pass = pass
+    end
+    
+    def self.ip
+      connected? ? ESP32.wifi_get_ip : nil
+    end
+    
+    def self.connected?
+      ESP32.wifi_has_ip?
+    end
+    
+    def self.on_disconnect &b
+      ESP32.on_wifi_disconnect &b
     end
   end
 end
