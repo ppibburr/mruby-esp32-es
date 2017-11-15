@@ -34,6 +34,7 @@ typedef struct {
 
 typedef struct {
 	bool          init;
+	int           ai;
 	QueueHandle_t event_queue;
 	TaskHandle_t  task;
 	mrb_state*    mrb;
@@ -92,6 +93,7 @@ static int mruby_esp32_loop_poll_event(mrb_state* mrb) {
 	  }
     }
 	
+	mrb_gc_arena_restore(mrb, mruby_esp32_loop_env.ai);
 	return 0;
 }
 
@@ -108,8 +110,9 @@ static mrb_value mruby_esp32_loop_task_yield(mrb_state* mrb, mrb_value self) {
 
 static void mruby_esp32_loop_init(mrb_state* mrb) {
     mruby_esp32_loop_env.task        = xTaskGetCurrentTaskHandle();
-    mruby_esp32_loop_env.event_queue = xQueueCreate( 10, sizeof(mruby_esp32_loop_event_t));
-    mruby_esp32_loop_env.init        = TRUE;              
+    mruby_esp32_loop_env.event_queue = xQueueCreate( 3, sizeof(mruby_esp32_loop_event_t));
+    mruby_esp32_loop_env.init        = TRUE;
+    mruby_esp32_loop_env.ai          = mrb_gc_arena_save(mrb);      
 }
 
 static mrb_value mruby_esp32_loop_log(mrb_state* mrb, mrb_value self) {
@@ -133,8 +136,8 @@ mruby_esp32_loop_wifi_event_cb(void *ctx, system_event_t *event)
       break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
       // This is a workaround as ESP32 WiFi libs don't currently auto-reassociate. 
-      esp_wifi_connect();
       xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
+      esp_wifi_connect();
       break;
     default:
         break;
@@ -183,6 +186,10 @@ static mrb_value mruby_esp32_loop_wifi_has_ip(mrb_state* mrb, mrb_value self) {
     return mrb_nil_value();
 }
 
+static mrb_value mruby_esp32_loop_stack_watermark(mrb_state* mrb, mrb_value self) {
+	return mrb_fixnum_value(uxTaskGetStackHighWaterMark(mruby_esp32_loop_env.task));
+}
+
 void
 mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
 {
@@ -205,12 +212,13 @@ mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
   mrb_define_const(mrb, mrb->object_class, "ENV", mrb_obj_value(Data_Wrap_Struct(mrb, mrb->object_class, NULL, &mruby_esp32_loop_env)));
 	
   mrb_define_module_function(mrb, esp32, "event?", mruby_esp32_loop_get_event, MRB_ARGS_NONE());      
-  mrb_define_module_function(mrb, esp32, "yield!", mruby_esp32_loop_task_yield, MRB_ARGS_NONE());    
+  //mrb_define_module_function(mrb, esp32, "yield!", mruby_esp32_loop_task_yield, MRB_ARGS_NONE());    
   mrb_define_module_function(mrb, esp32, "log",    mruby_esp32_loop_log, MRB_ARGS_REQ(1));      
 
   mrb_define_module_function(mrb, esp32, "__wifi_connect__",  mruby_esp32_loop_wifi_connect, MRB_ARGS_REQ(2)); 
   mrb_define_module_function(mrb, esp32, "wifi_get_ip",       mruby_esp32_loop_wifi_get_ip, MRB_ARGS_NONE());   
   mrb_define_module_function(mrb, esp32, "wifi_has_ip?",      mruby_esp32_loop_wifi_has_ip, MRB_ARGS_NONE());   
+  mrb_define_module_function(mrb, esp32, "watermark",         mruby_esp32_loop_stack_watermark, MRB_ARGS_NONE());    
 
 
   constants = mrb_define_module_under(mrb, esp32, "Constants");

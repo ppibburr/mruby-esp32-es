@@ -1,6 +1,6 @@
 pin = ESP32::GPIO::Pin.new(23, :output)
-
-t     = 0
+p :one
+$t     = 0
 level = false
 
 half_cycle = 30
@@ -18,27 +18,54 @@ ESP32::WiFi.connect("LGL64VL_7870", "FooBar12") do |ip|
   puts "\nIP: #{ip}\n"
 end
 
-lt = ESP32.time
+$lt = ESP32.time
+
+$lmf=nil
+def lmf
+  q = ESP32::System.available_memory
+  return $lmf=q if !$lmf
+  
+  if q < $lmf
+    return $lmf = q
+  end
+  
+  return $lmf
+end
+
+GC.start
 
 ESP32.main do
-  t += 1
+  $t += 1
   
-  next unless lt != ESP32.time
+  #if ($t % 3) == 0
+    GC.start 
   
-  lt = ESP32.time
   
-  if (tmr.count % 500) == 0   
-    if (half_cycle += step*dir) > 500
-      half_cycle = 500
+  next unless $lt != ESP32.time
+  
+  $lt = ESP32.time
+  
+  if (tmr.count % 133) == 0   
+    if (half_cycle += step*dir) > 133
+      half_cycle = 133
       dir = -1
-    elsif half_cycle < 33
-      half_cycle = 33
+    elsif half_cycle < 11
+      half_cycle = 11
       dir = 1
     end
   end
   
-  if (tmr.count % 2500) == 0
-    print "\n2.5s Elapsed. Looped: #{t.inspect} times. WIFI: connected? #{ESP32::WiFi.connected?.inspect}, IP: #{ESP32::WiFi.ip.inspect}\n"
-    p ESP32::System.available_memory
+  if tmr.count > 0 and (tmr.count % 133) == 0
+    # 20c ###################
+    puts "\n"
+    puts "0.5s Elapsed."
+    puts "Looped: "
+    puts "#{$t.inspect}"
+    puts "WIFI: #{ESP32::WiFi.connected?.inspect}"
+    puts "IP:"
+    puts "#{ESP32::WiFi.ip.inspect}"
+    puts "Memory Free:"
+    puts "#{lmf} / #{ESP32::System.available_memory}"
+    p ESP32.watermark
   end
 end

@@ -8,27 +8,26 @@ module ESP32
   end
   
   def self.pass!
-    event? if events_enabled?   
+    event?# if events_enabled?   
     
     @time = Time.now.to_f
     
     Timer.fire_for(time)
     
-    if wifi_has_ip?
-      if !@wifi_connected
-        @wifi_connected = true
-        if cb = @on_wifi_connected_cb
-          cb.call wifi_get_ip
-        end
+    if !@wifi_connected and wifi_has_ip?
+      @wifi_connected = true
+      
+      if cb = @on_wifi_connected_cb
+        cb.call wifi_get_ip
       end
     else
-      if @wifi_connected
+      if @wifi_connected and !wifi_has_ip?
         if cb = @on_wifi_disconnected_cb
           cb.call
         end
+        
+        @wifi_connected = false
       end
-      
-      @wifi_connected = false
     end
   end
   
