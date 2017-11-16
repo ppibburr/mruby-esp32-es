@@ -1,6 +1,6 @@
 module ESP32
   def self.time
-    @time ||= Time.now.to_f
+    @time ||= Time.now
   end
   
   def self.wifi_connected?
@@ -8,27 +8,29 @@ module ESP32
   end
   
   def self.pass!
-    event?# if events_enabled?   
+    #event?# if events_enabled?   
     
-    @time = Time.now.to_f
+    time.initialize
     
-    Timer.fire_for(time)
+    Timer.fire_for(time.to_f)
     
     if !@wifi_connected and wifi_has_ip?
       @wifi_connected = true
       
-      if cb = @on_wifi_connected_cb
-        cb.call wifi_get_ip
+      if @on_wifi_connected_cb
+        @on_wifi_connected_cb.call wifi_get_ip
       end
     else
       if @wifi_connected and !wifi_has_ip?
-        if cb = @on_wifi_disconnected_cb
-          cb.call
+        if @on_wifi_disconnected_cb
+          @on_wifi_disconnected_cb.call
         end
         
         @wifi_connected = false
       end
     end
+    
+    return true
   end
   
   def self.loop
@@ -76,12 +78,12 @@ module ESP32
     __wifi_connect__ ssid,pass  
   end 
   
-  def self.main
+  def self.main &b
     while 1
       pass!
     
       yield
-    end  
+    end
   end
   
   class Timer
@@ -159,6 +161,7 @@ module ESP32
       stop
       @interval = i
       start if bool
+      bool = nil
       
       return i
     end
@@ -193,18 +196,20 @@ module ESP32
         step = interval
       end
 
-      @n_tick = ESP32.time + step      
+      @n_tick = ESP32.time.to_f + step   
+      step = nil   
     end
     
     def tick!
+      
       update_next_tick
     
       if enabled?
         @count += 1
-      
+
         if count > max and max > 0
-          if cb = @on_expire_cb
-            cb.call self if enabled?
+          if @on_expire_cb
+            @on_expire_cb.call self if enabled?
           end
           
           unless auto_reset
@@ -214,8 +219,8 @@ module ESP32
           end
         end
         
-        if cb = @on_tick_cb
-          cb.call self, count
+        if @on_tick_cb
+          @on_tick_cb.call self, count
         end 
       end
     end
@@ -246,14 +251,3 @@ module ESP32
   end
 end
 
-def print m
-  ESP32.log m
-end
-
-def p m
-  print m.inspect
-end
-
-def puts m
-  print m.to_s
-end

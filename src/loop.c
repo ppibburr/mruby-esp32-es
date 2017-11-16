@@ -92,8 +92,6 @@ static int mruby_esp32_loop_poll_event(mrb_state* mrb) {
 		return 1;
 	  }
     }
-	
-	mrb_gc_arena_restore(mrb, mruby_esp32_loop_env.ai);
 	return 0;
 }
 
@@ -112,7 +110,30 @@ static void mruby_esp32_loop_init(mrb_state* mrb) {
     mruby_esp32_loop_env.task        = xTaskGetCurrentTaskHandle();
     mruby_esp32_loop_env.event_queue = xQueueCreate( 3, sizeof(mruby_esp32_loop_event_t));
     mruby_esp32_loop_env.init        = TRUE;
-    mruby_esp32_loop_env.ai          = mrb_gc_arena_save(mrb);      
+       
+}
+
+static mrb_value mruby_esp32_loop_app_run(mrb_state* mrb, mrb_value self) {
+	mrb_value app;
+	mrb_get_args(mrb, "&", &app);
+    mruby_esp32_loop_env.ai = mrb_gc_arena_save(mrb);
+	
+    while (1) {
+	  mrb_funcall(mrb, app, "call", 0);
+
+	  //is exception occure?
+	  if (mrb->exc){
+		  // Serial.println("failed to run!");
+		  // print_exception(mrb);
+		  mrb->exc = 0;
+		  // delay(1000);
+		  printf("err\n");
+	  }
+
+	  mrb_gc_arena_restore(mrb,mruby_esp32_loop_env.ai);
+	}
+	
+	return mrb_nil_value();
 }
 
 static mrb_value mruby_esp32_loop_log(mrb_state* mrb, mrb_value self) {
@@ -122,6 +143,17 @@ static mrb_value mruby_esp32_loop_log(mrb_state* mrb, mrb_value self) {
 	ESP_LOGE(TAG, "%s", mrb_string_value_cstr(mrb, &msg));
 	
 	return mrb_nil_value();
+}
+
+static mrb_value mruby_esp32_loop_free(mrb_state* mrb, mrb_value self) {
+  mrb_value t;
+  mrb_get_args(mrb, "o", &t);
+  struct mrb_time* tm = NULL;
+  tm = (struct mrb_time*)DATA_PTR(t);
+  if (tm) {
+    mrb_free(mrb, tm);
+  }
+  return mrb_nil_value();
 }
 
 static esp_err_t 
@@ -209,12 +241,13 @@ mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
     
   esp32 = mrb_define_module(mrb, "ESP32");
 	
-  mrb_define_const(mrb, mrb->object_class, "ENV", mrb_obj_value(Data_Wrap_Struct(mrb, mrb->object_class, NULL, &mruby_esp32_loop_env)));
-	
-  mrb_define_module_function(mrb, esp32, "event?", mruby_esp32_loop_get_event, MRB_ARGS_NONE());      
-  //mrb_define_module_function(mrb, esp32, "yield!", mruby_esp32_loop_task_yield, MRB_ARGS_NONE());    
-  mrb_define_module_function(mrb, esp32, "log",    mruby_esp32_loop_log, MRB_ARGS_REQ(1));      
+  mrb_define_const(mrb, mrb->object_class, "ENV",  mrb_obj_value(Data_Wrap_Struct(mrb, mrb->object_class, NULL, &mruby_esp32_loop_env)));
 
+  mrb_define_module_function(mrb, esp32, "app_run", mruby_esp32_loop_app_run, MRB_ARGS_NONE());  
+  mrb_define_module_function(mrb, esp32, "free", mruby_esp32_loop_free, MRB_ARGS_REQ(1));    	
+  mrb_define_module_function(mrb, esp32, "event?", mruby_esp32_loop_get_event, MRB_ARGS_NONE());      
+  mrb_define_module_function(mrb, esp32, "yield!", mruby_esp32_loop_task_yield, MRB_ARGS_NONE());    
+  mrb_define_module_function(mrb, esp32, "log",    mruby_esp32_loop_log, MRB_ARGS_REQ(1));       
   mrb_define_module_function(mrb, esp32, "__wifi_connect__",  mruby_esp32_loop_wifi_connect, MRB_ARGS_REQ(2)); 
   mrb_define_module_function(mrb, esp32, "wifi_get_ip",       mruby_esp32_loop_wifi_get_ip, MRB_ARGS_NONE());   
   mrb_define_module_function(mrb, esp32, "wifi_has_ip?",      mruby_esp32_loop_wifi_has_ip, MRB_ARGS_NONE());   
