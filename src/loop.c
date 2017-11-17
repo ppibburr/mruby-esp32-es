@@ -136,12 +136,30 @@ static mrb_value mruby_esp32_loop_app_run(mrb_state* mrb, mrb_value self) {
 	return mrb_nil_value();
 }
 
-static mrb_value mruby_esp32_loop_log(mrb_state* mrb, mrb_value self) {
-	mrb_value msg;
-	mrb_get_args(mrb, "S", &msg);
+static mrb_value mruby_esp32_loop_printfd(mrb_state* mrb, mrb_value self) {
+	mrb_int i;
+	mrb_get_args(mrb, "i", &i);
 	
-	ESP_LOGE(TAG, "%s", mrb_string_value_cstr(mrb, &msg));
+	printf("%d", (int)i);
+
+	return mrb_nil_value();
+}
+
+static mrb_value mruby_esp32_loop_printff(mrb_state* mrb, mrb_value self) {
+	mrb_float f;
+	mrb_get_args(mrb, "f", &f);
 	
+	printf("%f", (float)f);
+
+	return mrb_nil_value();
+}
+
+static mrb_value mruby_esp32_loop_printfs(mrb_state* mrb, mrb_value self) {
+	mrb_value s;
+	mrb_get_args(mrb, "S", &s);
+	int ai = mrb_gc_arena_save(mrb);
+	printf("%s", mrb_string_value_cstr(mrb,&s));
+    mrb_gc_arena_restore(mrb,ai);
 	return mrb_nil_value();
 }
 
@@ -247,7 +265,10 @@ mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
   mrb_define_module_function(mrb, esp32, "free", mruby_esp32_loop_free, MRB_ARGS_REQ(1));    	
   mrb_define_module_function(mrb, esp32, "event?", mruby_esp32_loop_get_event, MRB_ARGS_NONE());      
   mrb_define_module_function(mrb, esp32, "yield!", mruby_esp32_loop_task_yield, MRB_ARGS_NONE());    
-  mrb_define_module_function(mrb, esp32, "log",    mruby_esp32_loop_log, MRB_ARGS_REQ(1));       
+//  mrb_define_module_function(mrb, esp32, "log",    mruby_esp32_loop_log, MRB_ARGS_REQ(1));       
+  mrb_define_module_function(mrb, esp32, "printfs",    mruby_esp32_loop_printfs, MRB_ARGS_REQ(1));
+  mrb_define_module_function(mrb, esp32, "printff",    mruby_esp32_loop_printff, MRB_ARGS_REQ(1));
+  mrb_define_module_function(mrb, esp32, "printfd",    mruby_esp32_loop_printfd, MRB_ARGS_REQ(1));    
   mrb_define_module_function(mrb, esp32, "__wifi_connect__",  mruby_esp32_loop_wifi_connect, MRB_ARGS_REQ(2)); 
   mrb_define_module_function(mrb, esp32, "wifi_get_ip",       mruby_esp32_loop_wifi_get_ip, MRB_ARGS_NONE());   
   mrb_define_module_function(mrb, esp32, "wifi_has_ip?",      mruby_esp32_loop_wifi_has_ip, MRB_ARGS_NONE());   

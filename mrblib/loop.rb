@@ -238,7 +238,8 @@ module ESP32
     end
     
     def self.ip
-      connected? ? ESP32.wifi_get_ip : nil
+      return @ip if @ip
+      connected? ? @ip=ESP32.wifi_get_ip : nil
     end
     
     def self.connected?
@@ -251,3 +252,6 @@ module ESP32
   end
 end
 
+def puts s
+  ESP32.log s
+end
