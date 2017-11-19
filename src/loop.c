@@ -15,11 +15,7 @@
 #include "esp_wifi.h"
 #include "esp_event_loop.h"
 
-#include "lwip/err.h"
-#include "lwip/sockets.h"
-#include "lwip/sys.h"
-#include "lwip/netdb.h"
-#include "lwip/dns.h"
+#include "esp_request.h"
 
 #include "mruby.h"
 #include "mruby/error.h"
@@ -29,7 +25,9 @@
 
 typedef struct {
   mrb_value cb;
-  mrb_value data;
+  int type;
+  int len;
+  void* data;
 } mruby_esp32_loop_event_t;
 
 typedef struct {
@@ -78,7 +76,23 @@ static void mruby_esp32_loop_send_event(mruby_esp32_loop_event_t* event, bool is
 static void mruby_esp32_loop_process_event(mrb_state* mrb, mruby_esp32_loop_event_t* event) { 	
  	if (!mrb_nil_p(event->cb)) {
 	  int ai = mrb_gc_arena_save(mrb);
-      mrb_funcall_argv(mrb, event->cb, mrb_intern_cstr(mrb, "call"), 1, &event->data); 
+	  mrb_value data;
+	  switch (event->type) {
+		  case 0:
+		    data = mrb_fixnum_value((int)event->data);
+		    break;
+		  case 1:
+		    data = mrb_float_value(mrb, *(float *)&event->data);
+		    break;
+		  case 2:
+		    data = mrb_str_new_cstr(mrb, (char*)event->data);
+		    break;
+		  default:
+		    data = mrb_nil_value();
+		    break;		    		    
+	  }
+
+      mrb_funcall(mrb, event->cb, "call", 1, data); 
       mrb_gc_arena_restore(mrb, ai);	
     }	
 }
@@ -115,12 +129,14 @@ static void mruby_esp32_loop_init(mrb_state* mrb) {
 
 static mrb_value mruby_esp32_loop_app_run(mrb_state* mrb, mrb_value self) {
 	mrb_value app;
-	mrb_get_args(mrb, "&", &app);
+	mrb_get_args(mrb, "o", &app);
     mruby_esp32_loop_env.ai = mrb_gc_arena_save(mrb);
 	
     while (1) {
-	  mrb_funcall(mrb, app, "call", 0);
-
+	  if (mruby_esp32_loop_poll_event(mrb) == 0) {
+	    mrb_funcall(mrb, app, "call", 0);
+      }
+      
 	  //is exception occure?
 	  if (mrb->exc){
 		  // Serial.println("failed to run!");
@@ -131,6 +147,7 @@ static mrb_value mruby_esp32_loop_app_run(mrb_state* mrb, mrb_value self) {
 	  }
 
 	  mrb_gc_arena_restore(mrb,mruby_esp32_loop_env.ai);
+	  vTaskDelay(1);
 	}
 	
 	return mrb_nil_value();
@@ -230,19 +247,124 @@ static mrb_value mruby_esp32_loop_wifi_get_ip(mrb_state* mrb, mrb_value self) {
 
 static mrb_value mruby_esp32_loop_wifi_has_ip(mrb_state* mrb, mrb_value self) {
 	if ((xEventGroupGetBits(wifi_event_group) & CONNECTED_BIT) != 0) {
+      tcpip_adapter_ip_info_t ip_info;
+      ESP_ERROR_CHECK(tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip_info));
       return mrb_true_value();
     }
     
     return mrb_nil_value();
+
 }
 
 static mrb_value mruby_esp32_loop_stack_watermark(mrb_state* mrb, mrb_value self) {
 	return mrb_fixnum_value(uxTaskGetStackHighWaterMark(mruby_esp32_loop_env.task));
 }
 
+typedef struct {
+	request_t* req;
+	int len;
+	char* data;
+} dl_event;
+
+static dl_event mesp_block_dl_event = {0};
+
+int mruby_esp32_loop_download_callback(request_t *req, char* data, int len) {
+	mesp_block_dl_event.req  = req;
+	mesp_block_dl_event.data = data;
+	mesp_block_dl_event.len  = len;
+	
+	return 0;
+}
+
+static mrb_value str;
+
+static mrb_value mruby_esp32_loop_eval(mrb_state* mrb, mrb_value self) {
+	char* str;
+	mrb_get_args(mrb,"z",&str);
+	int ai=mrb_gc_arena_save(mrb);
+	mrb_load_string(mrb, str);
+	mrb_gc_arena_restore(mrb,ai);
+	return mrb_nil_value();
+}
+
+static mrb_value mruby_esp32_loop_http_get(mrb_state* mrb, mrb_value self) {
+	mesp_block_dl_event.data="";
+	mesp_block_dl_event.len = 0;
+	
+    mrb_value uri, cb; // id;
+    mrb_get_args(mrb, "S&",&uri,&cb);//,&id);
+    int ai = mrb_gc_arena_save(mrb);
+    //req_setopt(req, REQ_SET_HEADER, id);
+    request_t *req = req_new(mrb_string_value_cstr(mrb, &uri));
+    req_setopt(req, REQ_SET_METHOD, "GET");
+    req_setopt(req, REQ_FUNC_DOWNLOAD_CB, mruby_esp32_loop_download_callback);
+    int status = req_perform(req);
+    req_clean(req);	
+    
+    mrb_funcall(mrb,str, "replace", 1, mrb_str_new_cstr(mrb, mesp_block_dl_event.data));
+   
+    mrb_funcall(mrb, cb, "call", 1, str);
+    
+    mrb_gc_arena_restore(mrb,ai);
+    
+    return mrb_fixnum_value(status);
+}
+
+static mrb_value mruby_esp32_loop_http_post(mrb_state* mrb, mrb_value self) {
+    /*request_t *req = req_new(uri)
+    req_setopt(req, REQ_SET_METHOD, "POST");
+    req_setopt(req, REQ_SET_POSTFIELDS, mrb_string_value_cstr(&flds));
+    req_setopt(req, REQ_FUNC_DOWNLOAD_CB, download_callback);
+    status = req_perform(req);
+    req_clean(req);	*/
+    
+    return mrb_nil_value();
+}
+
+static int websocket_cb(request_t *req, int status, void *buffer, int len)
+{
+    switch(status) {
+        case WS_CONNECTED:
+            ESP_LOGI(TAG, "websocket connected");
+            req_write(req, "hello world\n", 12);
+            break;
+        case WS_DATA:
+            ((char*)buffer)[len] = 0;
+            mruby_esp32_loop_event_t* evt = (mruby_esp32_loop_event_t*)req->context;
+            evt->data=buffer;
+            ESP_LOGI(TAG, "websocket data = %s\ntype %d\n", (char*)evt->data,evt->type);
+            mruby_esp32_loop_send_event(evt, FALSE); 
+            //req_close(req);
+            break;
+        case WS_DISCONNECTED:
+            ESP_LOGI(TAG, "websocket disconnected");
+            req_clean(req);
+            req = NULL;
+            break;
+    }
+    return 0;
+}
+
+static int ws_id=0;
+static mrb_value mruby_esp32_loop_ws(mrb_state* mrb, mrb_value self) {
+	mrb_value cb;
+	mrb_get_args(mrb, "&", &cb);
+	
+	static mruby_esp32_loop_event_t evt = {0};
+	evt.cb   = cb;
+	evt.type = 2; 
+    request_t *req = req_new("ws://demos.kaazing.com/echo"); // or wss://echo.websocket.org
+    req->context = (void*)&evt;
+    req_setopt(req, REQ_FUNC_WEBSOCKET, websocket_cb);
+    req_perform(req);	
+	return mrb_true_value();
+}
+
 void
 mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
 {
+	
+  str=mrb_str_new_cstr(mrb,"");
   esp_log_level_set("wifi", ESP_LOG_NONE); // disable wifi driver logging	
 	
   mruby_esp32_loop_env.init        = FALSE;
@@ -272,6 +394,11 @@ mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
   mrb_define_module_function(mrb, esp32, "__wifi_connect__",  mruby_esp32_loop_wifi_connect, MRB_ARGS_REQ(2)); 
   mrb_define_module_function(mrb, esp32, "wifi_get_ip",       mruby_esp32_loop_wifi_get_ip, MRB_ARGS_NONE());   
   mrb_define_module_function(mrb, esp32, "wifi_has_ip?",      mruby_esp32_loop_wifi_has_ip, MRB_ARGS_NONE());   
+
+  mrb_define_module_function(mrb, esp32, "ws",    mruby_esp32_loop_ws, MRB_ARGS_NONE()); 
+  mrb_define_module_function(mrb, esp32, "get",    mruby_esp32_loop_http_get, MRB_ARGS_REQ(1)); 
+  mrb_define_module_function(mrb, esp32, "eval",   mruby_esp32_loop_eval, MRB_ARGS_REQ(1)); 
+  
   mrb_define_module_function(mrb, esp32, "watermark",         mruby_esp32_loop_stack_watermark, MRB_ARGS_NONE());    
 
 

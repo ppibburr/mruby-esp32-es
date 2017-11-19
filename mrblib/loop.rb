@@ -1,3 +1,93 @@
+module ESP32;class Printf
+  NIL   = "nil"
+  TRUE  = "true"
+  FALSE = "false"
+  
+  def initialize fmt
+    @fmt = fmt.split("%s")
+    @args = []
+  end
+  
+  def []= i,v
+    @args[i]=v
+  end
+  
+  def write_arg
+    if @args[@i].is_a? Float
+      ESP32.printff @args[@i]
+    elsif @args[@i].is_a? String
+      ESP32.printfs @args[@i]
+    elsif @args[@i].is_a? Fixnum
+      ESP32.printfd @args[@i]
+    elsif @args[@i] == nil
+      ESP32.printfs NIL
+    elsif @args[@i] == true
+      ESP32.printfs TRUE
+    elsif @args[@i] == false
+      ESP32.printfs FALSE    
+    else
+      ESP32.printfs a.inspect
+    end  
+  end
+  
+  def write a,b=nil,c=nil,d=nil,e=nil,f=nil,g=nil,h=nil,i=nil,j=nil,k=nil,l=nil,m=nil
+    @args[0]=a
+    @args[1]=b
+    @args[2]=c
+    @args[3]=d
+    @args[4]=e
+    @args[5]=f
+    @args[6]=g
+    @args[7]=h
+    @args[8]=i
+    @args[9]=j
+    @args[10]=k
+    @args[11]=l
+    @args[12]=m
+                                               
+    @i=0
+    arg=nil
+    while @i < @fmt.length
+      ESP32.printfs @fmt[@i]
+      write_arg
+      @i+=1
+    end
+  end
+  
+  module Writer
+    def printf a,b=nil,c=nil,d=nil,e=nil,f=nil,g=nil,h=nil,i=nil,j=nil,k=nil,l=nil,m=nil
+      @printf.write a,b,c,d,e,f,g,h,i,j,k,l,m
+    end
+  end
+end;end
+
+def puts s
+  if s.is_a?(String)
+    ESP32.printfs s
+  elsif s.is_a?(Fixnum)
+    ESP32.printfd s
+  elsif s.is_a? Float
+    ESP32.printff s
+  else
+    ESP32.printfs s.to_s
+  end
+  ESP32.printfs @nl||="\n"
+end
+
+def p s
+  if s.is_a?(String)
+    ESP32.printfs s
+  elsif s.is_a?(Fixnum)
+    ESP32.printfd s
+  elsif s.is_a? Float
+    ESP32.printff s
+  else
+    ESP32.printfs s.inspect
+  end
+  ESP32.printfs @nl||="\n"
+end
+
+
 module ESP32
   def self.time
     @time ||= Time.now
@@ -8,11 +98,12 @@ module ESP32
   end
   
   def self.pass!
-    #event?# if events_enabled?   
-    
+    @lt ||= time.to_f
     time.initialize
     
-    Timer.fire_for(time.to_f)
+    return unless time.to_f > @lt
+    
+    @lt = time.to_f;
     
     if !@wifi_connected and wifi_has_ip?
       @wifi_connected = true
@@ -46,29 +137,6 @@ module ESP32
     end
   end
 
-  def self.timeout d, res=:usec, &b
-    Timer.new [d, res], 1, &b
-  end
-  
-  def self.interval d, res=:usec, &b
-    Timer.new [d, res], &b
-  end
-  
-  @events_enabled        = false
-  @event_poll_block_time = Constants::PORT_MAX_DELAY
-  def self.enable_events block_time=@event_poll_block_time
-    @events_enabled = true
-    @event_poll_block_time = block_time
-  end
-  
-  def self.disable_events
-    @events_enabled = false
-  end
-  
-  def self.events_enabled?
-    @events_enabled
-  end
-
   def self.on_wifi_disconnect &b
     @on_wifi_disconnected_cb = b
   end
@@ -79,151 +147,10 @@ module ESP32
   end 
   
   def self.main &b
-    while 1
+    app_run(Proc.new do
       pass!
-    
-      yield
-    end
-  end
-  
-  class Timer
-    attr_accessor :count, :max, :auto_reset, :n_tick
-    attr_reader   :interval, :resolution
-    
-    @timers = []
-    
-    protected
-    def self.add_timer tmr
-      @timers << tmr
-    end
-    
-    public
-    def self.timers
-      @timers.map do |t| t end
-    end
-    
-    def self.remove_timer tmr
-      @timers.delete tmr
-      return tmr
-    end
-    
-    def self.firing time
-      @timers.find_all do |t|
-        t.n_tick <= t
-      end
-    end
-    
-    def self.fire_for time
-      @timers.each do |t|
-        t.tick! if t.n_tick <= time
-      end 
-    end
-    
-    def initialize interval, max = -1, &b
-      a = interval.is_a?(Array) ? interval : [interval]
-      
-      self.class.add_timer self
-      
-      @interval   = a[0]
-      @resolution = a[1] || :usec
-      
-      p update_next_tick    
-      
-      max = max ? max : -1
-      
-      @max      = max
-      @count    = 0
-      
-      if b and max < 0
-        on_tick &b
-        start
-      elsif b
-        on_expire &b
-      end
-    end
-    
-    def delete
-      stop
-      self.class.remove_timer self
-    end
-    
-    def stop
-      @enable = false
-    end
-    
-    def reset
-      @count = 0
-      start unless enabled? 
-    end
-    
-    def interval= i
-      bool = enabled?
-      stop
-      @interval = i
-      start if bool
-      bool = nil
-      
-      return i
-    end
-    
-    def start
-      @enable = true
-    end
-    
-    def enabled?
-      @enable
-    end
-  
-    alias :enable :start
-    alias :disable :stop
-    
-    def on_tick &b
-      @on_tick_cb = b
-    end
-    
-    def on_expire &b
-      @on_expire_cb = b
-    end
-    
-    def update_next_tick
-      step = nil
-      case resolution
-      when :usec
-        step = interval  *  0.000001
-      when :millis
-        step = interval * 0.001
-      when :second
-        step = interval
-      end
-
-      @n_tick = ESP32.time.to_f + step   
-      step = nil   
-    end
-    
-    def tick!
-      
-      update_next_tick
-    
-      if enabled?
-        @count += 1
-
-        if count > max and max > 0
-          if @on_expire_cb
-            @on_expire_cb.call self if enabled?
-          end
-          
-          unless auto_reset
-            stop
-          else
-            reset
-          end
-        end
-        
-        if @on_tick_cb
-          @on_tick_cb.call self, count
-        end 
-      end
-    end
+      b.call
+    end)
   end
   
   class WiFi
@@ -250,8 +177,4 @@ module ESP32
       ESP32.on_wifi_disconnect &b
     end
   end
-end
-
-def puts s
-  ESP32.log s
 end
