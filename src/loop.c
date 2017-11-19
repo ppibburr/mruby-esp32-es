@@ -50,6 +50,10 @@ void mruby_esp32_loop_data_env(mrb_state* mrb, mrb_value data, void* _t, mruby_e
   Data_Get_Struct(mrb, data, NULL, *env);
 }
 
+void mruby_esp32_loop_data_req(mrb_state* mrb, mrb_value data, void* _t, request_t** req) {
+  Data_Get_Struct(mrb, data, NULL, *req);
+}
+
 static void mruby_esp32_loop_send_event_full(mruby_esp32_loop_event_t* event, bool isr, bool priority) {
 	if (priority == TRUE) {
 	  if(isr && (mruby_esp32_loop_env.init)) {
@@ -148,7 +152,7 @@ static mrb_value mruby_esp32_loop_app_run(mrb_state* mrb, mrb_value self) {
 	  }
 
 	  mrb_gc_arena_restore(mrb,mruby_esp32_loop_env.ai);
-	  vTaskDelay(1);
+	  //vTaskDelay(1);
 	}
 	
 	return mrb_nil_value();
@@ -313,19 +317,18 @@ static int websocket_cb(request_t *req, int status, void *buffer, int len)
 {
     switch(status) {
         case WS_CONNECTED:
-            ESP_LOGI(TAG, "websocket connected");
-            req_write(req, "hello world\n", 12);
             break;
         case WS_DATA:
             ((char*)buffer)[len] = 0;
+
             mruby_esp32_loop_event_t* evt = (mruby_esp32_loop_event_t*)req->context;
+
             evt->data=buffer;
-            ESP_LOGI(TAG, "websocket data = %s\ntype %d\n", (char*)evt->data,evt->type);
+
             mruby_esp32_loop_send_event(evt, FALSE); 
-            //req_close(req);
+
             break;
         case WS_DISCONNECTED:
-            ESP_LOGI(TAG, "websocket disconnected");
             req_clean(req);
             req = NULL;
             break;
@@ -333,26 +336,54 @@ static int websocket_cb(request_t *req, int status, void *buffer, int len)
     return 0;
 }
 
-static int ws_id=0;
 static mrb_value mruby_esp32_loop_ws(mrb_state* mrb, mrb_value self) {
 	mrb_value cb;
-	mrb_get_args(mrb, "&", &cb);
+	char* host;
+	mrb_get_args(mrb, "z&", &host, &cb);
 	
 	static mruby_esp32_loop_event_t evt = {0};
 	evt.cb   = cb;
 	evt.type = 2; 
-    request_t *req = req_new("ws://demos.kaazing.com/echo"); // or wss://echo.websocket.org
+    request_t *req = req_new(host); // or wss://echo.websocket.org
     req->context = (void*)&evt;
     req_setopt(req, REQ_FUNC_WEBSOCKET, websocket_cb);
     req_perform(req);	
-	return mrb_obj_value(Data_Wrap_Struct(mrb, mrb_obj_class(mrb, mrb_const_get(mrb, mrb_obj_value(mrb->object_class), mrb_intern_cstr(mrb, "WebSocket"))), NULL, &mruby_esp32_loop_env));
+	return mrb_obj_value(Data_Wrap_Struct(mrb, mrb->object_class, NULL, req));
+}
+
+static mrb_value mruby_esp32_loop_ws_write(mrb_state* mrb, mrb_value self) {
+	mrb_value ins;
+	char* str;
+	mrb_int len;
+	
+	mrb_get_args(mrb, "os", &ins,&str,&len);
+	
+	request_t* req;
+	mruby_esp32_loop_data_req(mrb,ins,NULL,&req);
+	
+	req_write(req,str,(int)len);
+	
+	return ins;
+}
+
+static mrb_value mruby_esp32_loop_ws_close(mrb_state* mrb, mrb_value self) {
+	mrb_value ins;
+	
+	mrb_get_args(mrb, "o", &ins);
+	
+	request_t* req;
+	mruby_esp32_loop_data_req(mrb,ins,NULL,&req);
+	
+	req_clean(req);
+	
+	return mrb_nil_value();
 }
 
 void
 mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
 {
   esp_log_level_set("wifi", ESP_LOG_NONE); // disable wifi driver logging	
-	
+  esp_log_level_set("HTTP_REQ", ESP_LOG_NONE); //	
   mruby_esp32_loop_env.init        = FALSE;
   mruby_esp32_loop_env.event_queue = NULL;	
 
@@ -382,10 +413,12 @@ mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
   mrb_define_module_function(mrb, esp32, "wifi_get_ip",       mruby_esp32_loop_wifi_get_ip, MRB_ARGS_NONE());   
   mrb_define_module_function(mrb, esp32, "wifi_has_ip?",      mruby_esp32_loop_wifi_has_ip, MRB_ARGS_NONE());   
 
-  mrb_define_module_function(mrb, esp32, "ws",    mruby_esp32_loop_ws, MRB_ARGS_NONE()); 
-  mrb_define_module_function(mrb, esp32, "get",    mruby_esp32_loop_http_get, MRB_ARGS_REQ(1)); 
+  mrb_define_module_function(mrb, esp32, "ws_write",    mruby_esp32_loop_ws_write, MRB_ARGS_REQ(2)); 
+  mrb_define_module_function(mrb, esp32, "close",       mruby_esp32_loop_ws_close, MRB_ARGS_REQ(1));
+  mrb_define_module_function(mrb, esp32, "ws",          mruby_esp32_loop_ws, MRB_ARGS_NONE());   
+  mrb_define_module_function(mrb, esp32, "get",         mruby_esp32_loop_http_get, MRB_ARGS_REQ(1)); 
   
-  mrb_define_module_function(mrb, esp32, "watermark",         mruby_esp32_loop_stack_watermark, MRB_ARGS_NONE());    
+  mrb_define_module_function(mrb, esp32, "watermark",   mruby_esp32_loop_stack_watermark, MRB_ARGS_NONE());    
 
 
   constants = mrb_define_module_under(mrb, esp32, "Constants");

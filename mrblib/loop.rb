@@ -180,4 +180,24 @@ module ESP32
 end
 
 class WebSocket
+  def initialize host, &recv
+    @host = host
+    @ws   = ESP32.ws host, &recv
+  end
+  
+  def puts s
+    ESP32.ws_write @ws, s
+  end
+  
+  def close
+    ESP32.ws_close @ws
+  end
+  
+  def on_connect &b
+  
+  end
+  
+  def on_disconnect &b
+  
+  end
 end
