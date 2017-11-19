@@ -21,17 +21,25 @@ class << self
     memory:     least %s, current %s
     least free stack: %s")
 
-    ESP32::WiFi.connect("kittykat", "FooBar-12") do |ip|
+    ESP32::WiFi.connect("ppibburr", "ppibburr69") do |ip|
       puts "ip: #{@ip = ip}"
      
       ESP32.get "http://time.jsontest.com" do |body|
         puts body
       end
      
-      @ws = WebSocket.new("ws://echo.websocket.org") do |str|
-        print "WebSocket: read - "
-        puts str
-        GC.start
+      @ws = WebSocket.new("ws://echo.websocket.org") do |ins, data|
+        case data
+        when WebSocket::Event::CONNECT
+          puts "WebSocket: Connected to: #{ins.host}"
+        when WebSocket::Event::DISCONNECT
+          puts "WebSocket: Disconnected"
+          @ws = nil
+        else
+          print "WebSocket: message - "
+          puts data
+          GC.start
+        end
       end
     end
   end

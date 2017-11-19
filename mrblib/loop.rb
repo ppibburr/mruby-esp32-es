@@ -87,6 +87,17 @@ def p s
   ESP32.printfs @nl||="\n"
 end
 
+def print s
+  if s.is_a?(String)
+    ESP32.printfs s
+  elsif s.is_a?(Fixnum)
+    ESP32.printfd s
+  elsif s.is_a? Float
+    ESP32.printff s
+  else
+    ESP32.printfs s.inspect
+  end
+end
 
 module ESP32
   def self.time
@@ -180,9 +191,28 @@ module ESP32
 end
 
 class WebSocket
+  class Event
+    CONNECT    = 0
+    DISCONNECT = 1
+  end
+  
+  attr_reader :host
   def initialize host, &recv
     @host = host
-    @ws   = ESP32.ws host, &recv
+    @ws   = ESP32.ws host do |data|
+      case data
+      when Event::CONNECT
+        @connected = true
+      when Event::DISCONNECT
+        @connected=false
+      end
+      
+      recv.call self, data
+    end
+  end
+  
+  def connected?
+    @connected
   end
   
   def puts s
@@ -191,13 +221,5 @@ class WebSocket
   
   def close
     ESP32.ws_close @ws
-  end
-  
-  def on_connect &b
-  
-  end
-  
-  def on_disconnect &b
-  
   end
 end

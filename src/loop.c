@@ -26,6 +26,7 @@
 
 typedef struct {
   mrb_value cb;
+
   int type;
   int len;
   void* data;
@@ -315,24 +316,36 @@ static mrb_value mruby_esp32_loop_http_post(mrb_state* mrb, mrb_value self) {
 
 static int websocket_cb(request_t *req, int status, void *buffer, int len)
 {
+	mruby_esp32_loop_event_t* evt = (mruby_esp32_loop_event_t*)req->context;
+	
+	bool send=TRUE;
+	
     switch(status) {
         case WS_CONNECTED:
+            evt->type=0;
+            evt->data=0;
             break;
         case WS_DATA:
             ((char*)buffer)[len] = 0;
-
-            mruby_esp32_loop_event_t* evt = (mruby_esp32_loop_event_t*)req->context;
-
-            evt->data=buffer;
-
-            mruby_esp32_loop_send_event(evt, FALSE); 
+            
+            evt->type = 2;
+            evt->data=buffer; 
 
             break;
         case WS_DISCONNECTED:
+            evt->type=0;
+            evt->data=1;
             req_clean(req);
             req = NULL;
             break;
+        default:
+            send=FALSE;
     }
+    
+    if (send) {
+      mruby_esp32_loop_send_event(evt, FALSE);
+	}
+	
     return 0;
 }
 
@@ -343,11 +356,13 @@ static mrb_value mruby_esp32_loop_ws(mrb_state* mrb, mrb_value self) {
 	
 	static mruby_esp32_loop_event_t evt = {0};
 	evt.cb   = cb;
-	evt.type = 2; 
-    request_t *req = req_new(host); // or wss://echo.websocket.org
+ 
+    request_t *req = req_new(host); 
     req->context = (void*)&evt;
+    
     req_setopt(req, REQ_FUNC_WEBSOCKET, websocket_cb);
     req_perform(req);	
+	
 	return mrb_obj_value(Data_Wrap_Struct(mrb, mrb->object_class, NULL, req));
 }
 
