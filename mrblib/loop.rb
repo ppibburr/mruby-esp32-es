@@ -178,3 +178,6 @@ module ESP32
     end
   end
 end
+
+class WebSocket
+end
