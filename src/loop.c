@@ -22,6 +22,10 @@
 #include "mruby/string.h"
 #include "mruby/data.h"
 #include "mruby/variable.h"
+#include "mruby/compile.h"
+#include "nvs_flash.h"
+
+
 #define TAG "mesp-loop"
 
 typedef struct {
@@ -91,7 +95,7 @@ static void mruby_esp32_loop_process_event(mrb_state* mrb, mruby_esp32_loop_even
 		    data = mrb_float_value(mrb, *(float *)&event->data);
 		    break;
 		  case 2:
-		    data = mrb_str_new_cstr(mrb, (char*)event->data);
+		    data = mrb_str_new(mrb, (char*)event->data, event->len-1);
 		    break;
 		  default:
 		    data = mrb_nil_value();
@@ -99,6 +103,7 @@ static void mruby_esp32_loop_process_event(mrb_state* mrb, mruby_esp32_loop_even
 	  }
 
       mrb_funcall(mrb, event->cb, "call", 1, data); 
+      event->data=(void*)"";
       mrb_gc_arena_restore(mrb, ai);	
     }	
 }
@@ -137,6 +142,17 @@ static mrb_value mruby_esp32_loop_app_run(mrb_state* mrb, mrb_value self) {
 	mrb_value app;
 	mrb_get_args(mrb, "o", &app);
     mruby_esp32_loop_env.ai = mrb_gc_arena_save(mrb);
+	nvs_handle nvs;
+	
+	nvs_open("mruby-esp32", NVS_READWRITE, &nvs);
+
+    size_t string_size;
+    esp_err_t err = nvs_get_str(nvs, "code", NULL, &string_size);
+    char* str = malloc(string_size);
+    err = nvs_get_str(nvs, "code", str, &string_size);
+
+	printf("%s\n",str);
+	mrb_load_string(mrb, str);
 	
     while (1) {
 	  if (mruby_esp32_loop_poll_event(mrb) == 0) {
@@ -329,7 +345,8 @@ static int websocket_cb(request_t *req, int status, void *buffer, int len)
             ((char*)buffer)[len] = 0;
             
             evt->type = 2;
-            evt->data=buffer; 
+            evt->data = buffer; 
+            evt->len  = len+1;
 
             break;
         case WS_DISCONNECTED:

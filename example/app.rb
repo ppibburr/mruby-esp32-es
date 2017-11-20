@@ -21,7 +21,7 @@ class << self
     memory:     least %s, current %s
     least free stack: %s")
 
-    ESP32::WiFi.connect("ppibburr", "ppibburr69") do |ip|
+    ESP32::WiFi.connect("LGL64VL_7870", "FooBar12") do |ip|
       puts "ip: #{@ip = ip}"
      
       ESP32.get "http://time.jsontest.com" do |body|

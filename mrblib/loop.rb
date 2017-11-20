@@ -199,7 +199,9 @@ class WebSocket
   attr_reader :host
   def initialize host, &recv
     @host = host
+    @a=[]
     @ws   = ESP32.ws host do |data|
+      @a[0]=data
       case data
       when Event::CONNECT
         @connected = true
