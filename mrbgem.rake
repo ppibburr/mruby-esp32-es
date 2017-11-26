@@ -1,4 +1,4 @@
-MRuby::Gem::Specification.new('mruby-esp32-loop') do |spec|
+MRuby::Gem::Specification.new('mruby-esp32-es') do |spec|
   spec.license = 'MIT'
   spec.authors = 'ppibburr'
 

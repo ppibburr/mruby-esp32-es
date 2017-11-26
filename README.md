@@ -1,27 +1,33 @@
-mruby-esp32-loop
+mruby-esp32-es
 ============
 
-event loop for mruby-esp32.
+event system for mruby-esp32.
 
 ## Installation
 Add the line below to your `build_config.rb`:
 
 ```ruby
-  conf.gem :github => 'ppibburr/mruby-esp32-loop'
+  conf.gem :github => 'ppibburr/mruby-esp32-es'
 ```
 
 ## Example
 ```ruby
-cnt = 0
+client = MEES::TCPClient.new("192.168.1.100", 4567)
+client.puts "Hello"
 
-ESP32.interval 50000 do
-  print "Timeout: Count is #{cnt}"
+pin = ESP32::GPIO::Pin.new(23, :inout)
+
+start = MEES.time.to_f
+
+MEES.main do
+  if data=client.recv_nonblock  
+    puts data
+  end
   
-  true
-end
-
-ESP32.main do
-  cnt += 1
+  if (MEES.time.to_f - start) > 1
+    pin.write((pin.read == 1) ? 0 : 1)
+    start = MEES.time.to_f
+  end
 end
 ```
 
