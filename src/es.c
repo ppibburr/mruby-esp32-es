@@ -224,7 +224,19 @@ static mrb_value mruby_mees_main_quit(mrb_state* mrb, mrb_value self) {
 	return mrb_nil_value();
 }
 
+/* Time */
+static mrb_value mruby_mees_set_time(mrb_state* mrb, mrb_value self) {
+	mrb_int seconds;
+	mrb_int usecs;
+	
+	mrb_get_args(mrb, "ii", &seconds, &usecs);
 
+    struct timeval tv;
+    tv.tv_sec  = seconds
+    tv.tv_usec = usecs;
+
+    setimeofday(tm, NULL);
+}
 
 /* WiFi */
 
@@ -552,8 +564,11 @@ mrb_mruby_esp32_es_gem_init(mrb_state* mrb)
   mrb_define_module_function(mrb, mees, "event_pending_events", mruby_mees_event_pending_events, MRB_ARGS_NONE()); // n Events pending
   
   // Simple eval
-  mrb_define_module_function(mrb, mees, "eval",     mruby_mees_eval, MRB_ARGS_REQ(1));      // run some code
- 
+  mrb_define_module_function(mrb, mees, "eval",     mruby_mees_eval, MRB_ARGS_REQ(1));     // run some code
+
+  // Time
+  mrb_define_module_function(mrb, mees, "set_time", mruby_mees_set_time, MRB_ARGS_REQ(2)); // sets time
+
   // task
   mrb_define_module_function(mrb, mees, "task_yield",           mruby_mees_task_yield, MRB_ARGS_NONE());           // taskYEILD    
   mrb_define_module_function(mrb, mees, "task_stack_watermark", mruby_mees_task_stack_watermark, MRB_ARGS_NONE()); // Least amount of stack for task
