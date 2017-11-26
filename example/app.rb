@@ -19,6 +19,10 @@ class << self
       @client = MEES::TCPClient.new("192.168.43.202", 8080)
     end
     
+    MEES.interval 3.5 do |tmr|
+      puts @ts||="Timeout"
+    end
+    
     @start_ram = ESP32::System.available_memory
   end
 

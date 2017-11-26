@@ -11,6 +11,8 @@ module MEES
     
     return unless time.to_f > @lt
     
+    Timer.fire
+    
     @lt = time.to_f;
     
     if !@wifi_connected and wifi_has_ip?
@@ -295,6 +297,65 @@ module MEES
 end
 
 module MEES
+  class Timer
+    @timers = []
+    def self.timers
+      @timers
+    end
+    
+    def self.fire
+      time = MEES.time.to_f
+      i = 0
+      while i < timers.length
+        if timers[i].time <= time
+          timers[i].timeout time
+        end
+        i+=1
+      end
+    end
+
+    attr_accessor :repeat, :time
+    def initialize interval, repeat=true, &b
+      @cb = b
+      
+      @repeat = repeat
+      
+      set_interval interval
+    
+      self.class.timers.unshift self
+    end
+    
+    def set_interval int
+      @interval = int
+      update MEES.time.to_f
+    end
+    
+    def update time
+      @time = time + @interval  
+    end
+    
+    def timeout time
+      @cb.call self
+      
+      if !repeat
+        self.class.timers.delete self
+        return
+      end
+      
+      update time
+    end
+  end
+  
+  def self.interval i, &b
+    MEES::Timer.new i, &b
+  end
+  
+  def self.timeout i, &b
+    MEES::Timer.new i, false, &b
+  end  
+end
+
+module MEES
   DEFAULT_GC_FIRE_THRESHOLD = 0.88
 
   # sets the percentage of start ram to fire GC
@@ -312,6 +373,58 @@ module MEES
   # returns true if GC will fire next MEES.pass!
   def self.gc_will_fire
     (@start_ram * threshold_gc_fire ) >= ESP32::System.available_memory
+  end
+end
+
+module MEES
+  module self::Object
+    def timeout i, &b
+      MEES.timeout i, &b
+    end
+
+    def interval i, &b
+      MEES.interval i, &b
+    end
+    
+    def pass!
+      MEES.pass!
+    end
+    
+    def yield!
+      MEES::Task.yield
+    end
+    
+    def delay i
+      MEES::Task.delay i
+    end
+    
+    def next!
+      MEES::Event.next!
+    end
+    
+    def main obj=nil, &b
+      MEES.main obj, &b
+    end
+    
+    def on_idle obj=nil, &b
+      MEES.on_idle obj, &b
+    end
+    
+    def ip
+      MEES::WiFi.ip
+    end
+    
+    def max_delay
+      MEES::Port::MAX_DELAY
+    end
+    
+    def tick_rate
+      MEES::Port::TICK_RATE_MS
+    end
+    
+    def tick_period
+      MEES::Port::TICK_PERIOD_MS
+    end            
   end
 end
 
