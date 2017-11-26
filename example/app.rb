@@ -4,7 +4,10 @@ class << self
     @st ||= ESP32::time.to_f
     @tt ||= ESP32::time.to_f  
   
-    @pin   = ESP32::GPIO::Pin.new(23, :output)
+    @pin   = ESP32::GPIO::Pin.new(23, :inout)
+    def @pin.toggle
+      write((read == 1) ? 0 : 1)
+    end
     @t     = 0
     @level = false
 
@@ -21,8 +24,12 @@ class << self
     memory:     least %s, current %s
     least free stack: %s")
 
-    ESP32::WiFi.connect("LGL64VL_7870", "FooBar12") do |ip|
+    ESP32::WiFi.connect("ppibburr", "ppibburr69") do |ip|
       puts "ip: #{@ip = ip}"
+     
+      @client = TCPClient.new("192.168.1.101", 8080)
+      @client.recv_nonblock # doesnt block
+      @client.write "test\n"
      
       ESP32.get "http://time.jsontest.com" do |body|
         puts body
@@ -38,7 +45,6 @@ class << self
         else
           print "WebSocket: message - "
           puts data
-          GC.start
         end
       end
     end
@@ -59,23 +65,32 @@ class << self
   def run
     @t += 1
 
+    lmf
+
     if ((ESP32.time.to_f - @tt) >= (@half_cycle*0.001))  
       @tt = ESP32.time.to_f
-      lvl = (@level = !@level) ? 1 : 0 
-      @pin.write lvl 
+      @pin.toggle 
     end
 
     if (ESP32.time.to_f - @st) >= 1
       @st = ESP32.time.to_f
       log
       @ws.puts "Hello" if @ws
+    end
+    
+    if @client
+      if data = @client.recv_nonblock
+        puts @r||="read:"
+        puts data
+        @client.write "Read: #{data}\n"
+      end
     end    
   end
   
   def log
     printf @t,
-           ESP32::WiFi.ip,
-           lmf,
+           @ip,
+           @lmf,
            ESP32::System.available_memory, 
            ESP32.watermark  
   
@@ -83,7 +98,7 @@ class << self
   end
   
   def call
-    ESP32.pass!
+    return unless ESP32.pass!
     run
   end
 end

@@ -76,7 +76,7 @@ end
 
 def p s
   if s.is_a?(String)
-    ESP32.printfs s
+    ESP32.printfs s.inspect
   elsif s.is_a?(Fixnum)
     ESP32.printfd s
   elsif s.is_a? Float
@@ -158,9 +158,10 @@ module ESP32
   end 
   
   def self.main &b
+    @arb = b
     app_run(Proc.new do
       pass!
-      b.call
+      @arb.call
     end)
   end
   
@@ -170,7 +171,8 @@ module ESP32
     end
   
     def self.connect ssid, pass, &b
-      ESP32.wifi_connect ssid,pass, &b
+      @b = b
+      ESP32.wifi_connect ssid,pass, &@b
       @ssid = ssid
       @pass = pass
     end
@@ -199,9 +201,9 @@ class WebSocket
   attr_reader :host
   def initialize host, &recv
     @host = host
-    @a=[]
+    @recv = recv
+    
     @ws   = ESP32.ws host do |data|
-      @a[0]=data
       case data
       when Event::CONNECT
         @connected = true
@@ -209,7 +211,7 @@ class WebSocket
         @connected=false
       end
       
-      recv.call self, data
+      @recv.call self, data
     end
   end
   
@@ -225,3 +227,25 @@ class WebSocket
     ESP32.ws_close @ws
   end
 end
+
+class TCPClient
+  attr_reader :fd
+  def initialize host,port
+    @fd = ESP32.tcp_client host, port
+  end
+  
+  def recv_nonblock len=64
+    ESP32.recv_nonblock @fd, len
+  end
+  
+  def write msg
+    raise "WriteError" unless ESP32.write(@fd, msg)
+    true
+  end
+  
+  def puts msg
+    write msg+"\n"
+  end
+end
+
+GC.start

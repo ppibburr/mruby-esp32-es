@@ -22,10 +22,6 @@
 #include "mruby/string.h"
 #include "mruby/data.h"
 #include "mruby/variable.h"
-#include "mruby/compile.h"
-#include "nvs_flash.h"
-
-
 #define TAG "mesp-loop"
 
 typedef struct {
@@ -95,7 +91,7 @@ static void mruby_esp32_loop_process_event(mrb_state* mrb, mruby_esp32_loop_even
 		    data = mrb_float_value(mrb, *(float *)&event->data);
 		    break;
 		  case 2:
-		    data = mrb_str_new(mrb, (char*)event->data, event->len-1);
+		    data = mrb_str_new_cstr(mrb, (char*)event->data);
 		    break;
 		  default:
 		    data = mrb_nil_value();
@@ -103,7 +99,6 @@ static void mruby_esp32_loop_process_event(mrb_state* mrb, mruby_esp32_loop_even
 	  }
 
       mrb_funcall(mrb, event->cb, "call", 1, data); 
-      event->data=(void*)"";
       mrb_gc_arena_restore(mrb, ai);	
     }	
 }
@@ -141,18 +136,10 @@ static void mruby_esp32_loop_init(mrb_state* mrb) {
 static mrb_value mruby_esp32_loop_app_run(mrb_state* mrb, mrb_value self) {
 	mrb_value app;
 	mrb_get_args(mrb, "o", &app);
-    mruby_esp32_loop_env.ai = mrb_gc_arena_save(mrb);
-	nvs_handle nvs;
 	
-	nvs_open("mruby-esp32", NVS_READWRITE, &nvs);
-
-    size_t string_size;
-    esp_err_t err = nvs_get_str(nvs, "code", NULL, &string_size);
-    char* str = malloc(string_size);
-    err = nvs_get_str(nvs, "code", str, &string_size);
-
-	printf("%s\n",str);
-	mrb_load_string(mrb, str);
+	mrb_gc_protect(mrb, app);
+	
+    mruby_esp32_loop_env.ai = mrb_gc_arena_save(mrb);
 	
     while (1) {
 	  if (mruby_esp32_loop_poll_event(mrb) == 0) {
@@ -345,8 +332,7 @@ static int websocket_cb(request_t *req, int status, void *buffer, int len)
             ((char*)buffer)[len] = 0;
             
             evt->type = 2;
-            evt->data = buffer; 
-            evt->len  = len+1;
+            evt->data=buffer; 
 
             break;
         case WS_DISCONNECTED:
@@ -370,6 +356,8 @@ static mrb_value mruby_esp32_loop_ws(mrb_state* mrb, mrb_value self) {
 	mrb_value cb;
 	char* host;
 	mrb_get_args(mrb, "z&", &host, &cb);
+	
+	mrb_gc_protect(mrb, cb);
 	
 	static mruby_esp32_loop_event_t evt = {0};
 	evt.cb   = cb;
@@ -409,6 +397,70 @@ static mrb_value mruby_esp32_loop_ws_close(mrb_state* mrb, mrb_value self) {
 	req_clean(req);
 	
 	return mrb_nil_value();
+}
+
+static mrb_value mruby_esp32_loop_tcp_client(mrb_state* mrb, mrb_value self){
+    ESP_LOGI(TAG,"tcp_client task started \n");
+    
+    char* ip;
+    mrb_int port;
+    int s;
+    mrb_get_args(mrb, "zi", &ip, &port);
+    
+    struct sockaddr_in tcpServerAddr;
+    tcpServerAddr.sin_addr.s_addr = inet_addr(ip);
+    tcpServerAddr.sin_family = AF_INET;
+    tcpServerAddr.sin_port = htons( port );
+
+    s = socket(AF_INET, SOCK_STREAM, 0);
+    if(s < 0) {
+      ESP_LOGE(TAG, "... Failed to allocate socket.\n");
+      return mrb_nil_value();
+    }
+    
+    ESP_LOGI(TAG, "... allocated socket\n");
+    
+    if(connect(s, (struct sockaddr *)&tcpServerAddr, sizeof(tcpServerAddr)) != 0) {
+      ESP_LOGE(TAG, "... socket connect failed errno=%d \n", errno);
+      close(s);
+      return mrb_nil_value();
+    }
+    
+    return mrb_fixnum_value(s);
+}
+
+static mrb_value mruby_esp32_loop_write(mrb_state* mrb, mrb_value self) {
+	char* msg;
+	mrb_int fd;
+	mrb_get_args(mrb, "iz", &fd, &msg);
+	
+    if( write(fd , msg , strlen(msg)) < 0) {
+      ESP_LOGE(TAG, "... Send failed \n");
+      close(fd);
+    }
+     
+    ESP_LOGI(TAG, "... socket send success");
+    
+    return mrb_true_value();
+}
+
+static mrb_value mruby_esp32_loop_recv_nonblock(mrb_state* mrb, mrb_value self) {
+	mrb_int fd, len;
+	
+	mrb_get_args(mrb, "ii", &fd, &len);
+	
+	int r;
+	char recv_buf[len];
+	
+	bzero(recv_buf, sizeof(recv_buf));
+	
+	r = recv(fd, recv_buf, sizeof(recv_buf)-1, MSG_DONTWAIT);
+	
+	if (r > 0) {
+	  return mrb_str_new_cstr(mrb, (char*)recv_buf);
+	}
+
+    return mrb_nil_value();
 }
 
 void
@@ -452,6 +504,10 @@ mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
   
   mrb_define_module_function(mrb, esp32, "watermark",   mruby_esp32_loop_stack_watermark, MRB_ARGS_NONE());    
 
+
+  mrb_define_module_function(mrb, esp32, "tcp_client",    mruby_esp32_loop_tcp_client,    MRB_ARGS_REQ(2));
+  mrb_define_module_function(mrb, esp32, "write",         mruby_esp32_loop_write,         MRB_ARGS_REQ(2));
+  mrb_define_module_function(mrb, esp32, "recv_nonblock", mruby_esp32_loop_recv_nonblock, MRB_ARGS_REQ(2));    
 
   constants = mrb_define_module_under(mrb, esp32, "Constants");
 
