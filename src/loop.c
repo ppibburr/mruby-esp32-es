@@ -22,6 +22,10 @@
 #include "mruby/string.h"
 #include "mruby/data.h"
 #include "mruby/variable.h"
+#include "mruby/compile.h"
+#include "nvs_flash.h"
+
+
 #define TAG "mesp-loop"
 
 typedef struct {
@@ -91,7 +95,7 @@ static void mruby_esp32_loop_process_event(mrb_state* mrb, mruby_esp32_loop_even
 		    data = mrb_float_value(mrb, *(float *)&event->data);
 		    break;
 		  case 2:
-		    data = mrb_str_new_cstr(mrb, (char*)event->data);
+		    data = mrb_str_new(mrb, (char*)event->data, event->len-1);
 		    break;
 		  default:
 		    data = mrb_nil_value();
@@ -99,7 +103,14 @@ static void mruby_esp32_loop_process_event(mrb_state* mrb, mruby_esp32_loop_even
 	  }
 
       mrb_funcall(mrb, event->cb, "call", 1, data); 
-      mrb_gc_arena_restore(mrb, ai);	
+      
+      event->data=(void*)"";
+      
+      mrb_gc_arena_restore(mrb, ai);
+      
+      if (event->type == 2) {
+		//mrb_gc_free_str(mrb, RSTRING_PTR(data));
+	  } 	
     }	
 }
 
@@ -137,15 +148,30 @@ static mrb_value mruby_esp32_loop_app_run(mrb_state* mrb, mrb_value self) {
 	mrb_value app;
 	mrb_get_args(mrb, "o", &app);
 	
-	mrb_gc_protect(mrb, app);
+	mrb_gc_protect(mrb,app);
 	
     mruby_esp32_loop_env.ai = mrb_gc_arena_save(mrb);
+	nvs_handle nvs;
+	
+	nvs_open("mruby-esp32", NVS_READWRITE, &nvs);
+
+    size_t string_size;
+    esp_err_t err = nvs_get_str(nvs, "code", NULL, &string_size);
+    char* str = malloc(string_size);
+    err = nvs_get_str(nvs, "code", str, &string_size);
+
+	printf("%s\n",str);
+	mrb_load_string(mrb, str);
 	
     while (1) {
 	  if (mruby_esp32_loop_poll_event(mrb) == 0) {
 	    mrb_funcall(mrb, app, "call", 0);
+	  } else {
       }
       
+
+	  mrb_gc_arena_restore(mrb,mruby_esp32_loop_env.ai);
+
 	  //is exception occure?
 	  if (mrb->exc){
 		  // Serial.println("failed to run!");
@@ -154,8 +180,6 @@ static mrb_value mruby_esp32_loop_app_run(mrb_state* mrb, mrb_value self) {
 		  // delay(1000);
 		  printf("err\n");
 	  }
-
-	  mrb_gc_arena_restore(mrb,mruby_esp32_loop_env.ai);
 	  //vTaskDelay(1);
 	}
 	
@@ -332,7 +356,8 @@ static int websocket_cb(request_t *req, int status, void *buffer, int len)
             ((char*)buffer)[len] = 0;
             
             evt->type = 2;
-            evt->data=buffer; 
+            evt->data = buffer; 
+            evt->len  = len+1;
 
             break;
         case WS_DISCONNECTED:
@@ -357,7 +382,7 @@ static mrb_value mruby_esp32_loop_ws(mrb_state* mrb, mrb_value self) {
 	char* host;
 	mrb_get_args(mrb, "z&", &host, &cb);
 	
-	mrb_gc_protect(mrb, cb);
+	mrb_gc_protect(mrb,cb);
 	
 	static mruby_esp32_loop_event_t evt = {0};
 	evt.cb   = cb;
@@ -397,6 +422,23 @@ static mrb_value mruby_esp32_loop_ws_close(mrb_state* mrb, mrb_value self) {
 	req_clean(req);
 	
 	return mrb_nil_value();
+}
+
+static mrb_value mruby_esp32_loop_eval(mrb_state* mrb, mrb_value self) {
+	char* code;
+	
+	mrb_get_args(mrb, "z", &code);
+	int ai = mrb_gc_arena_save(mrb);
+	mrb_value res=mrb_load_string(mrb, code);
+	mrb_gc_arena_restore(mrb,ai);
+	
+	return mrb_funcall(mrb, res, "inspect", 0);
+}
+
+
+static mrb_value mruby_esp32_loop_n_events(mrb_state* mrb, mrb_value self) {
+	
+  return mrb_fixnum_value(uxQueueMessagesWaiting(mruby_esp32_loop_env.event_queue));
 }
 
 static mrb_value mruby_esp32_loop_tcp_client(mrb_state* mrb, mrb_value self){
@@ -484,14 +526,16 @@ mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
 	
   mrb_define_const(mrb, mrb->object_class, "ENV",  mrb_obj_value(Data_Wrap_Struct(mrb, mrb->object_class, NULL, &mruby_esp32_loop_env)));
 
-  mrb_define_module_function(mrb, esp32, "app_run", mruby_esp32_loop_app_run, MRB_ARGS_NONE());  
-  mrb_define_module_function(mrb, esp32, "free", mruby_esp32_loop_free, MRB_ARGS_REQ(1));    	
-  mrb_define_module_function(mrb, esp32, "event?", mruby_esp32_loop_get_event, MRB_ARGS_NONE());      
-  mrb_define_module_function(mrb, esp32, "yield!", mruby_esp32_loop_task_yield, MRB_ARGS_NONE());    
+  mrb_define_module_function(mrb, esp32, "app_run",  mruby_esp32_loop_app_run, MRB_ARGS_NONE());  
+  mrb_define_module_function(mrb, esp32, "free",     mruby_esp32_loop_free, MRB_ARGS_REQ(1));    	
+  mrb_define_module_function(mrb, esp32, "eval",     mruby_esp32_loop_eval, MRB_ARGS_REQ(1));   
+  mrb_define_module_function(mrb, esp32, "event?",   mruby_esp32_loop_get_event, MRB_ARGS_NONE());      
+  mrb_define_module_function(mrb, esp32, "n_events", mruby_esp32_loop_n_events, MRB_ARGS_NONE()); 
+  mrb_define_module_function(mrb, esp32, "yield!",   mruby_esp32_loop_task_yield, MRB_ARGS_NONE());    
      
-  mrb_define_module_function(mrb, esp32, "printfs",    mruby_esp32_loop_printfs, MRB_ARGS_REQ(1));
-  mrb_define_module_function(mrb, esp32, "printff",    mruby_esp32_loop_printff, MRB_ARGS_REQ(1));
-  mrb_define_module_function(mrb, esp32, "printfd",    mruby_esp32_loop_printfd, MRB_ARGS_REQ(1));    
+  mrb_define_module_function(mrb, esp32, "printfs", mruby_esp32_loop_printfs, MRB_ARGS_REQ(1));
+  mrb_define_module_function(mrb, esp32, "printff", mruby_esp32_loop_printff, MRB_ARGS_REQ(1));
+  mrb_define_module_function(mrb, esp32, "printfd", mruby_esp32_loop_printfd, MRB_ARGS_REQ(1));    
 
   mrb_define_module_function(mrb, esp32, "__wifi_connect__",  mruby_esp32_loop_wifi_connect, MRB_ARGS_REQ(2)); 
   mrb_define_module_function(mrb, esp32, "wifi_get_ip",       mruby_esp32_loop_wifi_get_ip, MRB_ARGS_NONE());   
@@ -507,7 +551,8 @@ mrb_mruby_esp32_loop_gem_init(mrb_state* mrb)
 
   mrb_define_module_function(mrb, esp32, "tcp_client",    mruby_esp32_loop_tcp_client,    MRB_ARGS_REQ(2));
   mrb_define_module_function(mrb, esp32, "write",         mruby_esp32_loop_write,         MRB_ARGS_REQ(2));
-  mrb_define_module_function(mrb, esp32, "recv_nonblock", mruby_esp32_loop_recv_nonblock, MRB_ARGS_REQ(2));    
+  mrb_define_module_function(mrb, esp32, "recv_nonblock", mruby_esp32_loop_recv_nonblock, MRB_ARGS_REQ(2));  
+
 
   constants = mrb_define_module_under(mrb, esp32, "Constants");
 

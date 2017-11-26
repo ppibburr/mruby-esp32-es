@@ -1,13 +1,18 @@
 class << self
   include ESP32::Printf::Writer
   def init
+    ESP32.tcp
+    ESP32.read
+    ESP32.write "test"
     @st ||= ESP32::time.to_f
     @tt ||= ESP32::time.to_f  
   
     @pin   = ESP32::GPIO::Pin.new(23, :inout)
+    
     def @pin.toggle
-      write((read == 1) ? 0 : 1)
+      write (read == 1) ? 0 : 1
     end
+    
     @t     = 0
     @level = false
 
@@ -20,22 +25,23 @@ class << self
 
     @printf ||= ESP32::Printf.new("\n
     looped:           %s
+    Events:           %s
     ip:               %s
     memory:     least %s, current %s
     least free stack: %s")
 
-    ESP32::WiFi.connect("ppibburr", "ppibburr69") do |ip|
+    ESP32::WiFi.connect("LGL64VL_7870", "FooBar12") do |ip|
       puts "ip: #{@ip = ip}"
      
-      @client = TCPClient.new("192.168.1.101", 8080)
+      @client = TCPClient.new("192.168.43.202", 8080)
       @client.recv_nonblock # doesnt block
-      @client.write "test\n"
-     
+      @client.write "test\n"    
+    
       ESP32.get "http://time.jsontest.com" do |body|
         puts body
       end
      
-      @ws = WebSocket.new("ws://echo.websocket.org") do |ins, data|
+      @ws = WebSocket.new("ws://192.168.43.202:8080") do |ins, data|
         case data
         when WebSocket::Event::CONNECT
           puts "WebSocket: Connected to: #{ins.host}"
@@ -43,11 +49,24 @@ class << self
           puts "WebSocket: Disconnected"
           @ws = nil
         else
-          print "WebSocket: message - "
-          puts data
+          if data and !data.empty?
+            begin
+              @ws.puts ESP32.eval(data)
+            rescue => e
+              puts e
+            end
+          end
         end
       end
     end
+  end
+
+  def p x
+    if @ws
+      @ws.puts x.is_a?(String) ? x : x.inspect
+    end
+    
+    super
   end
 
   def lmf
@@ -63,19 +82,19 @@ class << self
   end
 
   def run
+    b=false
     @t += 1
-
     lmf
-
+    
     if ((ESP32.time.to_f - @tt) >= (@half_cycle*0.001))  
       @tt = ESP32.time.to_f
-      @pin.toggle 
+      @pin.toggle
     end
 
-    if (ESP32.time.to_f - @st) >= 1
+    if (ESP32.time.to_f - @st) >= (@sr||=1)
       @st = ESP32.time.to_f
+      @ws.puts @ka||="PBR_KEEP_ALIVE" if @ws
       log
-      @ws.puts "Hello" if @ws
     end
     
     if @client
@@ -89,7 +108,8 @@ class << self
   
   def log
     printf @t,
-           @ip,
+           ESP32.n_events,
+           ESP32::WiFi.ip,
            @lmf,
            ESP32::System.available_memory, 
            ESP32.watermark  
@@ -99,6 +119,7 @@ class << self
   
   def call
     return unless ESP32.pass!
+    #ESP32::System.delay 1
     run
   end
 end

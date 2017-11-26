@@ -76,7 +76,7 @@ end
 
 def p s
   if s.is_a?(String)
-    ESP32.printfs s.inspect
+    ESP32.printfs s
   elsif s.is_a?(Fixnum)
     ESP32.printfd s
   elsif s.is_a? Float
@@ -158,10 +158,9 @@ module ESP32
   end 
   
   def self.main &b
-    @arb = b
     app_run(Proc.new do
-      pass!
-      @arb.call
+      next unless pass!
+      b.call
     end)
   end
   
@@ -202,7 +201,6 @@ class WebSocket
   def initialize host, &recv
     @host = host
     @recv = recv
-    
     @ws   = ESP32.ws host do |data|
       case data
       when Event::CONNECT
@@ -249,3 +247,5 @@ class TCPClient
 end
 
 GC.start
+GC.step_ratio = 50
+GC.interval_ratio = 50
