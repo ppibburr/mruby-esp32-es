@@ -579,9 +579,10 @@ static mrb_value mruby_mees_io_uart_read_char(mrb_state* mrb, mrb_value self) {
 static mrb_value mruby_mees_send_input_char(mrb_state* mrb, mrb_value self) {
 	  mrb_int c;
 	  mrb_int delay = 0;
+
 	  mrb_get_args(mrb, "i|i", &c, &delay);
-	  
-	  xQueueSendToBack(mees_env.input_q, c, delay);
+
+	  xQueueSendToBack(mees_env.input_q, (void*)&c, delay);
 	  
       return mrb_true_value();
 }
