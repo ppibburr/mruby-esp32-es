@@ -45,6 +45,7 @@ typedef struct {
 	mrb_value     idle_cb;     // The idle event handler
 	int           ai;          // Arena index at start
 	QueueHandle_t event_queue; // Event queue
+	QueueHandle_t input_q;     // Input queue
 	TaskHandle_t  task;        // Task Handle
 	mrb_state*    mrb;         // mrb_state*
 } mees_env_t;
@@ -552,11 +553,22 @@ static mrb_value mruby_mees_byte_swarm_to_str(mrb_state* mrb, mrb_value self) {
 }
 
 #include "rom/uart.h"
+int mees_read_input_char(int* read) {
+  int err = uart_rx_one_char(read);	
+  if (ESP_OK != err) {
+	 if (xQueueReceive(mees_env.input_q, read, 0)) {
+	   err   = ESP_OK; 
+	 }
+  }
+  
+  return err;
+}
+
 static mrb_value mruby_mees_io_uart_read_char(mrb_state* mrb, mrb_value self) {
 	  uint8_t read;	
       int  err;
 
-	  err = uart_rx_one_char(&read);
+	  err = mees_read_input_char(&read);
       if (err == ESP_OK) {
 		   return mrb_fixnum_value(read);
       }
@@ -564,12 +576,23 @@ static mrb_value mruby_mees_io_uart_read_char(mrb_state* mrb, mrb_value self) {
       return mrb_nil_value();
 }
 
+static mrb_value mruby_mees_send_input_char(mrb_state* mrb, mrb_value self) {
+	  mrb_int c;
+	  mrb_int delay = 0;
+	  mrb_get_args(mrb, "i|i", &c, &delay);
+	  
+	  xQueueSendToBack(mees_env.input_q, c, delay);
+	  
+      return mrb_true_value();
+}
+
 /* internal */
 
 static void 
 mees_init(mrb_state* mrb) {
     mees_env.task        = xTaskGetCurrentTaskHandle();
-    mees_env.event_queue = xQueueCreate( 10, sizeof(mees_event_t));
+    mees_env.event_queue = xQueueCreate( 10,   sizeof(mees_event_t));
+    mees_env.input_q     = xQueueCreate( 1024, sizeof(uint8_t));
     mees_env.init        = TRUE;
     mees_env.idle_cb     = mrb_nil_value();
     mees_env.run         = FALSE;
@@ -648,7 +671,8 @@ mrb_mruby_esp32_es_gem_init(mrb_state* mrb)
   mrb_define_module_function(mrb, mees, "io_recv_nonblock", mruby_mees_io_recv_nonblock,  MRB_ARGS_REQ(2));  
   mrb_define_module_function(mrb, mees, "io_close",         mruby_mees_io_close,          MRB_ARGS_REQ(1)); 
   mrb_define_module_function(mrb, mees, "io_uart_getc",     mruby_mees_io_uart_read_char, MRB_ARGS_NONE());  
-  
+
+  mrb_define_module_function(mrb, mees, "inputc",           mruby_mees_send_input_char, MRB_ARGS_REQ(1));    
 
 
 

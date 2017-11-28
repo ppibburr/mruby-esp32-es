@@ -233,6 +233,14 @@ module MEES
       MEES.io_recv_nonblock fd, len
     end
     
+    def self.flush fd
+      MEES.io_flush(fd)
+    end
+    
+    def self.putc fd, c
+      MEES.io_write fd, MEES.bytes_to_s(c)
+    end
+    
     def self.getc fd
       if fd == 1
         return MEES.io_uart_getc
@@ -253,6 +261,10 @@ module MEES
       MEES::IO.getc @fd
     end
     
+    def putc c
+      MEES::IO.putc @fd, c
+    end
+    
     def write msg
       raise "WriteError" unless MEES::IO.write(@fd, msg)
       true
@@ -260,6 +272,10 @@ module MEES
     
     def puts msg
       write msg+"\n"
+    end
+    
+    def flush
+      MEES::IO.flush @fd
     end
     
     def close
