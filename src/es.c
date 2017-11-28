@@ -23,6 +23,7 @@
 #include "mruby/data.h"
 #include "mruby/variable.h"
 #include "mruby/compile.h"
+#include "mruby/irep.h"
 #include "nvs_flash.h"
 
 #define TAG "mesp-loop"
@@ -519,6 +520,50 @@ static mrb_value mruby_mees_io_close(mrb_state* mrb, mrb_value self) {
 	return mrb_true_value();
 }
 
+
+void mees_swarm2uint8ta(mrb_state* mrb, mrb_value* rest, uint8_t* buff, int len) {		
+	int i=0;
+	for (i=0; i<len; i++) {
+		buff[i] = mrb_fixnum(rest[i]);
+	}
+}
+
+
+static mrb_value mruby_mees_eval_mrb(mrb_state* mrb, mrb_value self) {
+    mrb_value* rest;
+	int len;
+	mrb_get_args(mrb,"*", &rest, &len);
+		
+	uint8_t buff[len];
+	mees_swarm2uint8ta(mrb, rest, buff, len);
+	
+	return mrb_load_irep(mrb, buff);
+}
+
+static mrb_value mruby_mees_byte_swarm_to_str(mrb_state* mrb, mrb_value self) {
+    mrb_value* rest;
+	int len;
+	mrb_get_args(mrb,"*", &rest, &len);
+		
+	uint8_t buff[len];
+	mees_swarm2uint8ta(mrb, rest, buff, len);
+	
+	return mrb_str_new(mrb, (char*)buff, len);
+}
+
+#include "rom/uart.h"
+static mrb_value mruby_mees_io_uart_read_char(mrb_state* mrb, mrb_value self) {
+	  uint8_t read;	
+      int  err;
+
+	  err = uart_rx_one_char(&read);
+      if (err == ESP_OK) {
+		   return mrb_fixnum_value(read);
+      }
+      
+      return mrb_nil_value();
+}
+
 /* internal */
 
 static void 
@@ -566,8 +611,13 @@ mrb_mruby_esp32_es_gem_init(mrb_state* mrb)
   mrb_define_module_function(mrb, mees, "event_pending_events", mruby_mees_event_pending_events, MRB_ARGS_NONE()); // n Events pending
   
   // Simple eval
-  mrb_define_module_function(mrb, mees, "eval",          mruby_mees_eval,     MRB_ARGS_REQ(1)); // run some code
+  mrb_define_module_function(mrb, mees, "eval",       mruby_mees_eval,     MRB_ARGS_REQ(1)); // run some code
+  mrb_define_module_function(mrb, mees, "load_irep",  mruby_mees_eval_mrb, MRB_ARGS_ANY());  
 
+
+  // byte buffers
+  mrb_define_module_function(mrb, mees, "bytes_to_s",  mruby_mees_byte_swarm_to_str, MRB_ARGS_ANY());  
+  
   // Time
   mrb_define_module_function(mrb, mees, "time_set_time", mruby_mees_set_time, MRB_ARGS_REQ(2)); // sets time
 
@@ -594,9 +644,12 @@ mrb_mruby_esp32_es_gem_init(mrb_state* mrb)
   mrb_define_module_function(mrb, mees, "tcp_client_new",   mruby_mees_tcp_client_new,   MRB_ARGS_REQ(2));
   
   // IO
-  mrb_define_module_function(mrb, mees, "io_write",         mruby_mees_io_write,         MRB_ARGS_REQ(2));
-  mrb_define_module_function(mrb, mees, "io_recv_nonblock", mruby_mees_io_recv_nonblock, MRB_ARGS_REQ(2));  
-  mrb_define_module_function(mrb, mees, "io_close",         mruby_mees_io_close,         MRB_ARGS_REQ(1)); 
+  mrb_define_module_function(mrb, mees, "io_write",         mruby_mees_io_write,          MRB_ARGS_REQ(2));
+  mrb_define_module_function(mrb, mees, "io_recv_nonblock", mruby_mees_io_recv_nonblock,  MRB_ARGS_REQ(2));  
+  mrb_define_module_function(mrb, mees, "io_close",         mruby_mees_io_close,          MRB_ARGS_REQ(1)); 
+  mrb_define_module_function(mrb, mees, "io_uart_getc",     mruby_mees_io_uart_read_char, MRB_ARGS_NONE());  
+  
+
 
 
   // Constants

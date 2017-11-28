@@ -229,8 +229,16 @@ module MEES
       MEES.io_write fd, s
     end
     
-    def self.recv_nonblock fd, len=64
+    def self.recv_nonblock fd, len=64      
       MEES.io_recv_nonblock fd, len
+    end
+    
+    def self.getc fd
+      if fd == 1
+        return MEES.io_uart_getc
+      end
+      
+      recv_nonblock fd, 1
     end
     
     def self.close fd
@@ -239,6 +247,10 @@ module MEES
     
     def recv_nonblock len=64
       MEES::IO.recv_nonblock @fd, len
+    end
+
+    def getc
+      MEES::IO.getc @fd
     end
     
     def write msg
