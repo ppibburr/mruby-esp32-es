@@ -277,7 +277,7 @@ mruby_mees_wifi_connect(mrb_state *mrb, mrb_value self) {
   ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
 
   wifi_config_t wifi_config = {0};
-  //memset((void *)&wifi_config, 0, sizeof(wifi_config_t));
+
   snprintf(wifi_config.sta.ssid, sizeof(wifi_config.sta.ssid), "%s", ssid);
   snprintf(wifi_config.sta.password, sizeof(wifi_config.sta.password), "%s", password);
 
@@ -341,12 +341,18 @@ static mrb_value mruby_mees_http_get(mrb_state* mrb, mrb_value self) {
 }
 
 static mrb_value mruby_mees_http_post(mrb_state* mrb, mrb_value self) {
-    /*request_t *req = req_new(uri)
+    char *flds, *uri;
+    mrb_get_args(mrb, "zz", &uri, &flds);
+    
+    request_t *req = req_new(uri);
+    
     req_setopt(req, REQ_SET_METHOD, "POST");
-    req_setopt(req, REQ_SET_POSTFIELDS, mrb_string_value_cstr(&flds));
-    req_setopt(req, REQ_FUNC_DOWNLOAD_CB, download_callback);
+    req_setopt(req, REQ_SET_POSTFIELDS, flds);
+    req_setopt(req, REQ_FUNC_DOWNLOAD_CB, mees_http_callback);
+    
     status = req_perform(req);
-    req_clean(req);	*/
+    
+    req_clean(req);
     
     return mrb_nil_value();
 }
@@ -450,6 +456,73 @@ static mrb_value mruby_mees_eval(mrb_state* mrb, mrb_value self) {
 }
 
 /* TCP Client */
+static mrb_value mruby_mees_tcp_server_new(mrb_state* mrb, mrb_value self) {
+	mrb_int port = 80;
+	mrb_value accept_cb;
+	
+	mrb_get_args(mrb, "i&", &port, &accept_cb);
+	
+	struct sockaddr_in server_addr;
+
+	int s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+	if (s < 0) {
+		return mrb_nil_value();
+	}
+
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	server_addr.sin_port = htons(port);
+	
+	int rc  = bind(s, (struct sockaddr *)&server_addr, sizeof(server_addr));
+	
+	if (rc < 0) {
+		return mrb_false_value();
+	}
+
+	rc = listen(s, 5);
+	if (rc < 0) {
+		return mrb_fixnum_value(-1);
+	}
+	
+	static mees_event_t cb;
+	cb.cb   = accept_cb;
+	cb.type = s;
+	
+    xTaskCreate(mees_socket_accept, "mees_socket_accept", (1024), &cb, 2, NULL);
+	
+	return mrb_fixnum_value(s);	
+}
+
+mees_socket_accept(void* data) {
+	// copy event info
+	mees_event_t* e   = (mees_event_t*)data;
+	int s             = e->type;
+	mrb_value cb      = e->cb;
+	
+    struct sockaddr_in client_addr;
+	
+    while (1) {
+        socklen_t client_addr_len = sizeof(client_addr);
+	
+		int c = accept(s, (struct sockaddr *)&client_addr, &client_addr_len);
+	
+		if (c >= 0) {
+		  // new event
+		  mees_event_t evt = {0};
+		
+	  	  // fill event info
+		  evt.cb   = cb;
+		  evt.type = 0;
+		  evt.data = (void*)c; // <---
+		
+		  // send accept event
+		  mees_event_send(&evt, FALSE);
+	    }
+	}
+	
+	vTaskDelete();
+}
 
 static mrb_value mruby_mees_tcp_client_new(mrb_state* mrb, mrb_value self) {
     char* ip;
@@ -495,8 +568,9 @@ static mrb_value mruby_mees_io_write(mrb_state* mrb, mrb_value self) {
 
 static mrb_value mruby_mees_io_recv_nonblock(mrb_state* mrb, mrb_value self) {
 	mrb_int fd, len;
+	mrb_int c = 0;
 	
-	mrb_get_args(mrb, "ii", &fd, &len);
+	mrb_get_args(mrb, "ii|i", &fd, &len, &c);
 	
 	int r;
 	char recv_buf[len];
@@ -506,6 +580,9 @@ static mrb_value mruby_mees_io_recv_nonblock(mrb_state* mrb, mrb_value self) {
 	r = recv(fd, recv_buf, sizeof(recv_buf)-1, MSG_DONTWAIT);
 	
 	if (r > 0) {
+	  if ((c == 1) && (len == 1)) {
+		  return mrb_fixnum_value((mrb_int)recv_buf[0]);
+	  }	
 	  return mrb_str_new_cstr(mrb, (char*)recv_buf);
 	}
 
@@ -662,7 +739,7 @@ mrb_mruby_esp32_es_gem_init(mrb_state* mrb)
 
   // HTTP Client
   mrb_define_module_function(mrb, mees, "http_get",  mruby_mees_http_get,  MRB_ARGS_REQ(1));     
-  // mrb_define_module_function(mrb, mees, "http_post", mruby_mees_http_post, MRB_ARGS_REQ(1));  
+  mrb_define_module_function(mrb, mees, "http_post", mruby_mees_http_post, MRB_ARGS_REQ(2));  
   
   // TCP Client
   mrb_define_module_function(mrb, mees, "tcp_client_new",   mruby_mees_tcp_client_new,   MRB_ARGS_REQ(2));

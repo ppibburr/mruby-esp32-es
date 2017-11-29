@@ -246,7 +246,7 @@ module MEES
         return MEES.io_uart_getc
       end
       
-      recv_nonblock fd, 1
+      recv_nonblock(fd, 1, 1)
     end
     
     def self.close fd
@@ -254,7 +254,7 @@ module MEES
     end
     
     def recv_nonblock len=64
-      MEES::IO.recv_nonblock @fd, len
+      MEES::IO.recv_nonblock @fd, len, 0
     end
 
     def getc
@@ -272,10 +272,6 @@ module MEES
     
     def puts msg
       write msg+"\n"
-    end
-    
-    def flush
-      MEES::IO.flush @fd
     end
     
     def close
