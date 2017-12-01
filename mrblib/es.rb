@@ -229,8 +229,8 @@ module MEES
       MEES.io_write fd, s
     end
     
-    def self.recv_nonblock fd, len=64      
-      MEES.io_recv_nonblock fd, len
+    def self.recv_nonblock fd, len=64, c=0      
+      MEES.io_recv_nonblock fd, len, c=0
     end
     
     def self.flush fd
@@ -253,8 +253,8 @@ module MEES
       MEES.io_close fd
     end
     
-    def recv_nonblock len=64
-      MEES::IO.recv_nonblock @fd, len, 0
+    def recv_nonblock len=64, c=0
+      MEES::IO.recv_nonblock @fd, len, c
     end
 
     def getc
@@ -281,12 +281,36 @@ module MEES
 end
 
 module MEES
-  # Simple TCPClient
-  class TCPClient
+  module Socket
     include MEES::IO
+  end
   
+  class TCPSocket
+    include MEES::Socket
+  
+    def initialize fd
+      @fd = fd
+    end
+  end
+  
+  # Simple TCPClient
+  class TCPClient < TCPSocket
     def initialize host,port
       @fd = MEES.tcp_client_new host, port
+    end
+  end
+  
+  class TCPServer
+    attr_reader :port, :s
+    def initialize port=80, &b
+      @accept = b
+      @port   = port
+      
+      @b = Proc.new do |c|
+        @accept.call MEES::TCPSocket.new(c)
+      end
+      
+      @s = MEES.tcp_server_new port, &@b
     end
   end
 end
@@ -339,6 +363,7 @@ module MEES
     end
 
     attr_accessor :repeat, :time
+    attr_reader :interval
     def initialize interval, repeat=true, &b
       @cb = b
       
@@ -352,6 +377,10 @@ module MEES
     def set_interval int
       @interval = int
       update MEES.time.to_f
+    end
+    
+    def interval= int
+      set_interval int
     end
     
     def update time
@@ -452,6 +481,57 @@ module MEES
   end
 end
 
+module MEES
+  class Pin < ESP32::GPIO::Pin
+    def toggle rate=nil
+      if !rate
+        super()
+      elsif rate > 0
+        @tmr ||= MEES::Timer.new rate do
+          toggle
+        end
+        
+        @tmr.set_interval rate
+      elsif @tmr
+        @tmr.repeat = false
+        MEES::Timer.timers.delete @tmr
+        GC.start
+        @tmr = nil
+      end
+    end  
+  end
+end
+
+module MEES::STDIO
+  def print str
+	  MEES::IO.write 0, str
+	end
+
+	def puts q
+	  if q.is_a?(String)
+		  print q+"\n"
+	  else
+		  print q.to_s+"\n"
+	  end
+	end
+
+	def p q
+	  puts q.inspect
+	end
+  
+  def getc
+    MEES::IO.getc 1
+  end
+end
+
+class ::Object
+  unless methods.index :print
+    include MEES::STDIO
+  end
+end
+
 GC.start
 GC.step_ratio = 50
 GC.interval_ratio = 50
+
+

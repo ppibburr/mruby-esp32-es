@@ -350,7 +350,7 @@ static mrb_value mruby_mees_http_post(mrb_state* mrb, mrb_value self) {
     req_setopt(req, REQ_SET_POSTFIELDS, flds);
     req_setopt(req, REQ_FUNC_DOWNLOAD_CB, mees_http_callback);
     
-    status = req_perform(req);
+    req_perform(req);
     
     req_clean(req);
     
@@ -455,12 +455,46 @@ static mrb_value mruby_mees_eval(mrb_state* mrb, mrb_value self) {
 	return mrb_funcall(mrb, res, "inspect", 0);
 }
 
-/* TCP Client */
+void mees_server_accept(void* data) {
+	// copy event info
+	mees_event_t* e   = (mees_event_t*)data;
+	int s             = e->type;
+	mrb_value cb      = e->cb;
+	
+    struct sockaddr_in client_addr;
+	
+    while (1) {
+        socklen_t client_addr_len = sizeof(client_addr);
+	
+		int c = accept(s, (struct sockaddr *)&client_addr, &client_addr_len);
+	
+		if (c >= 0) {
+		  // new event
+		  mees_event_t evt = {0};
+		
+	  	  // fill event info
+		  evt.cb   = cb;
+		  evt.type = 0;
+		  evt.data = (void*)c; // <---
+		
+		  // send accept event
+		  mees_event_send(&evt, FALSE);
+	    }
+	}
+	
+	// vTaskDelete();
+}
+
+/* TCP */
+
+// Server
 static mrb_value mruby_mees_tcp_server_new(mrb_state* mrb, mrb_value self) {
 	mrb_int port = 80;
 	mrb_value accept_cb;
 	
 	mrb_get_args(mrb, "i&", &port, &accept_cb);
+	
+	mrb_gc_protect(mrb, accept_cb);
 	
 	struct sockaddr_in server_addr;
 
@@ -489,41 +523,13 @@ static mrb_value mruby_mees_tcp_server_new(mrb_state* mrb, mrb_value self) {
 	cb.cb   = accept_cb;
 	cb.type = s;
 	
-    xTaskCreate(mees_socket_accept, "mees_socket_accept", (1024), &cb, 2, NULL);
+    xTaskCreate(mees_server_accept, "mees_server_accept", (1024), &cb, 2, NULL);
 	
 	return mrb_fixnum_value(s);	
 }
 
-mees_socket_accept(void* data) {
-	// copy event info
-	mees_event_t* e   = (mees_event_t*)data;
-	int s             = e->type;
-	mrb_value cb      = e->cb;
-	
-    struct sockaddr_in client_addr;
-	
-    while (1) {
-        socklen_t client_addr_len = sizeof(client_addr);
-	
-		int c = accept(s, (struct sockaddr *)&client_addr, &client_addr_len);
-	
-		if (c >= 0) {
-		  // new event
-		  mees_event_t evt = {0};
-		
-	  	  // fill event info
-		  evt.cb   = cb;
-		  evt.type = 0;
-		  evt.data = (void*)c; // <---
-		
-		  // send accept event
-		  mees_event_send(&evt, FALSE);
-	    }
-	}
-	
-	vTaskDelete();
-}
 
+// Client
 static mrb_value mruby_mees_tcp_client_new(mrb_state* mrb, mrb_value self) {
     char* ip;
     mrb_int port;
@@ -743,7 +749,8 @@ mrb_mruby_esp32_es_gem_init(mrb_state* mrb)
   
   // TCP Client
   mrb_define_module_function(mrb, mees, "tcp_client_new",   mruby_mees_tcp_client_new,   MRB_ARGS_REQ(2));
-  
+  mrb_define_module_function(mrb, mees, "tcp_server_new",   mruby_mees_tcp_server_new,   MRB_ARGS_REQ(1));
+    
   // IO
   mrb_define_module_function(mrb, mees, "io_write",         mruby_mees_io_write,          MRB_ARGS_REQ(2));
   mrb_define_module_function(mrb, mees, "io_recv_nonblock", mruby_mees_io_recv_nonblock,  MRB_ARGS_REQ(2));  
